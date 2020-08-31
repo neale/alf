@@ -1,0 +1,47 @@
+import torch
+import alf.algorithms.adversarial_image_generator
+
+GENERATOR_CONV_PARAMS=((256, 4, 2, 1), (128, 4, 2, 1), (64, 4, 2, 1), (1, 4, 2, 1))
+# GENERATOR_CONV_PARAMS=((1024, 4, 2, 0), (512, 4, 2, 1), (256, 4, 2, 1), (1, 4, 2, 1))
+DISC_CONV_PARAMS=((64, 4, 2, 1), (128, 4, 2, 1), (256, 4, 2, 1), (512, 4, 2, 1))
+# DISC_CONV_PARAMS=((256, 4, 2, 1), (512, 4, 2, 1), (1024, 4, 2, 1), (1, 4, 1, 0))
+
+# dataset config
+create_dataset.dataset_name='mnist'
+create_dataset.train_batch_size=100
+create_dataset.test_batch_size=100
+create_dataset.scale=32
+create_dataset.normalize=False
+
+adversarialimagegenerator/Adam.lr=1e-4
+adversarialimagegenerator/Adam.weight_decay=1e-4
+
+
+# algorithm config
+AdversarialImageGenerator.noise_dim=100
+AdversarialImageGenerator.activation=torch.nn.functional.relu
+AdversarialImageGenerator.generator_conv_layer_params=%GENERATOR_CONV_PARAMS
+AdversarialImageGenerator.discriminator_conv_layer_params=%DISC_CONV_PARAMS
+AdversarialImageGenerator.last_activation_generator=torch.sigmoid
+AdversarialImageGenerator.discriminator_training_iters=5
+AdversarialImageGenerator.grad_lambda = 10.
+AdversarialImageGenerator.discriminator_weight_clip=0.
+AdversarialImageGenerator.generator_bn=True
+AdversarialImageGenerator.discriminator_bn=False
+
+
+AdversarialImageGenerator.optimizer=@adversarialimagegenerator/Adam()
+AdversarialImageGenerator.logging_training=True
+AdversarialImageGenerator.logging_evaluate=True
+AdversarialImageGenerator.logging_network=True
+
+# training config
+TrainerConfig.algorithm_ctor=@AdversarialImageGenerator
+TrainerConfig.num_epochs=1000
+TrainerConfig.num_checkpoints=2
+TrainerConfig.evaluate=True
+TrainerConfig.eval_interval=1
+TrainerConfig.summary_interval=1
+TrainerConfig.debug_summaries=True
+TrainerConfig.summarize_grads_and_vars=True
+

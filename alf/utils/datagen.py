@@ -21,7 +21,7 @@ import torchvision
 from torchvision import datasets, transforms
 
 
-def load_mnist(train_bs=100, test_bs=100, num_workers=0):
+def load_mnist(train_bs=100, test_bs=100, num_workers=0, scale=None, normalize=True):
     torch.cuda.manual_seed(1)
     kwargs = {
         'num_workers': num_workers,
@@ -29,25 +29,34 @@ def load_mnist(train_bs=100, test_bs=100, num_workers=0):
         'drop_last': False
     }
     path = 'data_m/'
+    if scale is None:
+        scale = 28
+    if normalize == True:
+        normalize = transforms.Normalize((0.1307, ), (0.3081, ))
+    else:
+        normalize = transforms.Normalize((0, ), (1, ))
+
     train_loader = torch.utils.data.DataLoader(
         datasets.MNIST(
             path,
             train=True,
             download=True,
             transform=transforms.Compose([
+                transforms.Resize(scale),
                 transforms.ToTensor(),
-                transforms.Normalize((0.1307, ), (0.3081, ))
+                normalize,
             ])),
         batch_size=train_bs,
-        shuffle=False,
+        shuffle=True,
         **kwargs)
     test_loader = torch.utils.data.DataLoader(
         datasets.MNIST(
             path,
             train=False,
             transform=transforms.Compose([
+                transforms.Resize(scale),
                 transforms.ToTensor(),
-                transforms.Normalize((0.1307, ), (0.3081, ))
+                normalize,
             ])),
         batch_size=test_bs,
         shuffle=False,

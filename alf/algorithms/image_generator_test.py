@@ -18,82 +18,62 @@ from absl import logging
 from absl.testing import parameterized
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 import alf
 from alf.algorithms.generator import Generator
 from alf.networks import Network
 from alf.tensor_specs import TensorSpec
 
+from alf.trainers.policy_trainer import create_dataset
 
 class Net(Network):
-    def __init__(self, dim=2):
+    def __init__(self, noise_dim, output_dim):
         super().__init__(
             input_tensor_spec=TensorSpec(shape=(dim, )), name="Net")
 
-        self.fc = nn.Linear(3, dim, bias=False)
-        w = torch.tensor([[1, 2], [-1, 1], [1, 1]], dtype=torch.float32)
-        self.fc.weight = nn.Parameter(w.t())
+        self.fc1 = nn.Linear(noise_dim, 256, bias=False)
+        self.fc2 = nn.Linear(256, 512, bias=False)
+        self.fc3 = nn.Linear(512, output_dim, bias=False)
 
     def forward(self, input, state=()):
-        return self.fc(input), ()
+        x = torch.relu_(self.fc1(input))
+        x = torch.relu_(self.fc2(x))
+        x = torch.sigmoid(self.fc3(x))
+        return x, ()
 
 
-class Net2(Network):
-    def __init__(self, dim=2):
-        super().__init__(
-            input_tensor_spec=[
-                TensorSpec(shape=(dim, )),
-                TensorSpec(shape=(dim, ))
-            ],
-            name="Net")
-        self.fc1 = nn.Linear(dim, dim, bias=False)
-        self.fc2 = nn.Linear(dim, dim, bias=False)
-        w = torch.tensor([[1, 2], [1, 1]], dtype=torch.float32)
-        u = torch.zeros((dim, dim), dtype=torch.float32)
-        self.fc1.weight = nn.Parameter(w.t())
-        self.fc2.weight = nn.Parameter(u.t())
-
-    def forward(self, input, state=()):
-        return self.fc1(input[0]) + self.fc2(input[1]), ()
-
-
-class GeneratorTest(parameterized.TestCase, alf.test.TestCase):
+class ImageGeneratorTest(parameterized.TestCase, alf.test.TestCase):
     def assertArrayEqual(self, x, y, eps):
         self.assertEqual(x.shape, y.shape)
         self.assertLessEqual(float(torch.max(abs(x - y))), eps)
 
     @parameterized.parameters(
-        #dict(entropy_regularization=1.0, par_vi='ksd'),
-        dict(entropy_regularization=1.0, par_vi='minmax'),
-        #dict(entropy_regularization=1.0, par_vi='gfsf'),
-        #dict(entropy_regularization=1.0, par_vi='svgd'),
-        #dict(entropy_regularization=1.0, par_vi='svgd2'),
-        #dict(entropy_regularization=1.0, par_vi='svgd3'),
-        dict(entropy_regularization=0.0),
-        dict(entropy_regularization=0.0, mi_weight=1),
+        dict(par_vi='minmax'),
+        dict(par_vi='gfsf'),
+        dict(par_vi='svgd'),
     )
-    def test_generator_unconditional(self,
-                                     entropy_regularization=0.0,
-                                     par_vi=None,
-                                     mi_weight=None):
+    def test_image_generator_mnist(self, par_vi=None)
         """
         The generator is trained to match(STEIN)/maximize(ML) the likelihood
         of a Gaussian distribution with zero mean and diagonal variance :math:`(1, 4)`.
         After training, :math:`w^T w` is the variance of the distribution implied by the
         generator. So it should be :math:`diag(1,4)` for STEIN and 0 for 'ML'.
         """
-        logging.info("entropy_regularization: %s par_vi: %s mi_weight: %s" %
-                     (entropy_regularization, par_vi, mi_weight))
-        dim = 2
-        batch_size = 512
-        net = Net(dim)
-        d_iters = 1
+        logging.info("par_vi: %s dataset: %s" %
+                     (par_vi, dataset))
+
+        trainset, _ = create_dataset()
+        dim = 784
+        noise_dim = 256
+        batch_size = 100
+        d_iters = 5
+
+        net = Net(noise_dim, dim)
         generator = Generator(
             dim,
-            noise_dim=3,
-            entropy_regularization=entropy_regularization,
+            noise_dim=256,
             net=net,
-            mi_weight=mi_weight,
             par_vi=par_vi,
             optimizer=alf.optimizers.AdamTF(lr=1e-3))
 
@@ -106,20 +86,21 @@ class GeneratorTest(parameterized.TestCase, alf.test.TestCase):
                 axis=-1)
 
         def _train(i):
-            if par_vi == 'minmax':
-                if i % (d_iters+1):
-                    model = 'critic'
+            for batch_idx, (data, _) in enumerate(trainset):
+                if par_vi == 'minmax':
+                    if i % (d_iters+1):
+                        model = 'critic'
+                    else:
+                        model = 'generator'
                 else:
-                    model = 'generator'
-            else:
-                model = None
-            alg_step = generator.train_step(
-                inputs=None,
-                loss_func=_neglogprob,
-                batch_size=batch_size,
-                model=model)
-            generator.update_with_gradient(alg_step.info)
-            generator.after_update(alg_step.info)
+                    model = None
+                alg_step = generator.train_step(
+                    inputs=None,
+                    loss_func=_neglogprob,
+                    batch_size=batch_size,
+                    model=model)
+                generator.update_with_gradient(alg_step.info)
+                generator.after_update(alg_step.info)
 
         for i in range(6000):
             _train(i)
@@ -139,7 +120,7 @@ class GeneratorTest(parameterized.TestCase, alf.test.TestCase):
     @parameterized.parameters(
         dict(entropy_regularization=1.0),
         dict(entropy_regularization=0.0),
-        #dict(entropy_regularization=0.0, mi_weight=1),
+        dict(entropy_regularization=0.0, mi_weight=1),
     )
     def test_generator_conditional(self,
                                    entropy_regularization=0.0,
@@ -181,7 +162,7 @@ class GeneratorTest(parameterized.TestCase, alf.test.TestCase):
             alg_step = generator.train_step(inputs=y, loss_func=_neglogprob)
             generator.update_with_gradient(alg_step.info)
 
-        for i in range(500):
+        for i in range(5000):
             _train()
             learned_var = torch.matmul(net.fc1.weight, net.fc1.weight.t())
             if i % 500 == 0:

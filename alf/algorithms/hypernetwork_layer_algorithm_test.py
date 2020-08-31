@@ -95,7 +95,7 @@ class HyperNetworkTest(parameterized.TestCase, alf.test.TestCase):
     def test_bayesian_linear_regression(self,
                                         par_vi='svgd3',
                                         particles=512,
-                                        train_batch_size=10):
+                                        train_batch_size=100):
         """
         The hypernetwork is trained to generate the parameter vector for a linear
         regressor. The target linear regressor is :math:`y = X\beta + e`, where 
@@ -122,7 +122,7 @@ class HyperNetworkTest(parameterized.TestCase, alf.test.TestCase):
             inputs.t() @ inputs)  # + torch.eye(input_size))
         true_mean = true_cov @ inputs.t() @ targets
         noise_dim = 3
-        d_iters = 3
+        d_iters = 1
         algorithm = HyperNetwork(
             input_tensor_spec=input_spec,
             last_layer_param=(output_dim, False),
@@ -132,8 +132,8 @@ class HyperNetworkTest(parameterized.TestCase, alf.test.TestCase):
             hidden_layers=None,
             loss_type='regression',
             par_vi=par_vi,
-            parameterization='layer',
-            optimizer=alf.optimizers.Adam(lr=1e-3))
+            parameterization='network',
+            optimizer=alf.optimizers.Adam(lr=1e-4))
         print("ground truth mean: {}".format(true_mean))
         print("ground truth cov norm: {}".format(true_cov.norm()))
         print("ground truth cov: {}".format(true_cov))
@@ -176,10 +176,12 @@ class HyperNetworkTest(parameterized.TestCase, alf.test.TestCase):
 
             print("-" * 68)
             
-            weight = algorithm._generator._net.layer_encoders[0]._fc_layers[0].weight
+            weight = algorithm._generator._net._fc_layers[0].weight
+            #weight = algorithm._generator._net.layer_encoders[0]._fc_layers[0].weight
             print("norm of generator weight: {}".format(weight.norm()))
             learned_cov = weight @ weight.t()
-            learned_mean = algorithm._generator._net.layer_encoders[0]._fc_layers[0].bias
+            #learned_mean = algorithm._generator._net.layer_encoders[0]._fc_layers[0].bias
+            learned_mean = algorithm._generator._net._fc_layers[0].bias
 
             pred_step = algorithm.predict_step(inputs, params=params)
             sampled_preds = pred_step.output.squeeze()  # [batch, particles]
@@ -214,16 +216,18 @@ class HyperNetworkTest(parameterized.TestCase, alf.test.TestCase):
             self.plot_predictions(inputs, targets, computed_preds, i)
             self.plot_cov_heatmap(true_cov, computed_cov, learned_cov, i)
         
-        train_iter = 6000
+        train_iter = 100000
         for i in range(train_iter):
             _train(i)
             if i % 1000 == 0:
                 _test(i)
-
-        learned_mean = algorithm._generator._net.layer_encoders[0]._fc_layers[0].bias
+        
+        #learned_mean = algorithm._generator._net.layer_encoders[0]._fc_layers[0].bias
+        learned_mean = algorithm._generator._fc_layers[0].bias
         mean_err = torch.norm(learned_mean - true_mean.squeeze())
         mean_err = mean_err / torch.norm(true_mean)
-        weight = algorithm._generator._net.layer_encoders[0]._fc_layers[0].weight
+        weight = algorithm._generator._net._fc_layers[0].weight
+        #weight = algorithm._generator._net.layer_encoders[0]._fc_layers[0].weight
         learned_cov = weight @ weight.t()
         cov_err = torch.norm(learned_cov - true_cov)
         cov_err = cov_err / torch.norm(true_cov)
