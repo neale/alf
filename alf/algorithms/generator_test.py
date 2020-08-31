@@ -64,11 +64,10 @@ class GeneratorTest(parameterized.TestCase, alf.test.TestCase):
 
     @parameterized.parameters(
         dict(entropy_regularization=1.0, par_vi='ksd'),
-        dict(entropy_regularization=1.0, par_vi='minmax'),
-        #dict(entropy_regularization=1.0, par_vi='gfsf'),
-        #dict(entropy_regularization=1.0, par_vi='svgd'),
-        #dict(entropy_regularization=1.0, par_vi='svgd2'),
-        #dict(entropy_regularization=1.0, par_vi='svgd3'),
+        dict(entropy_regularization=1.0, par_vi='gfsf'),
+        dict(entropy_regularization=1.0, par_vi='svgd'),
+        dict(entropy_regularization=1.0, par_vi='svgd2'),
+        dict(entropy_regularization=1.0, par_vi='svgd3'),
         dict(entropy_regularization=0.0),
         dict(entropy_regularization=0.0, mi_weight=1),
     )
@@ -106,22 +105,14 @@ class GeneratorTest(parameterized.TestCase, alf.test.TestCase):
                 axis=-1)
 
         def _train(i):
-            if par_vi == 'minmax':
-                if i % (d_iters+1):
-                    model = 'critic'
-                else:
-                    model = 'generator'
-            else:
-                model = None
             alg_step = generator.train_step(
                 inputs=None,
                 loss_func=_neglogprob,
-                batch_size=batch_size,
-                model=model)
+                batch_size=batch_size)
             generator.update_with_gradient(alg_step.info)
             generator.after_update(alg_step.info)
 
-        for i in range(6000):
+        for i in range(5000):
             _train(i)
             learned_var = torch.matmul(net.fc.weight, net.fc.weight.t())
             if i % 500 == 0:
