@@ -97,13 +97,12 @@ class ForwardNetwork(Algorithm):
                  ensemble_vote=None,
                  loss_type="classification",
                  optimizer=None,
-                 ignore_module=None,
                  logging_network=False,
                  logging_training=False,
                  logging_evaluate=False,
                  debug_summaries=False,
                  config: TrainerConfig = None,
-                 name="NetworkAlgorithm"):
+                 name="SLAlgorithm"):
         """
         Args:
             Args for the network to be trained
@@ -209,10 +208,7 @@ class ForwardNetwork(Algorithm):
         self._logging_training=logging_training
         self._logging_evaluate=logging_evaluate
         self._config = config
-        self._ignore_module = ignore_module
 
-    def _trainable_attributes_to_ignore(self):
-        return ['_ignore_module']
 
     def set_data_loader(self, train_loader, test_loader=None, outlier=None):
         """ Set data loader for training and testing. """
@@ -410,17 +406,17 @@ class ForwardNetwork(Algorithm):
         """Hutchinson's trace Jacobian estimator O(1) call to autograd,
             used by "\"minmax\" method"""
         eps = torch.randn_like(fx)
-        jvp = torch.autograd.grad(
+        vjp = torch.autograd.grad(
                 fx,
                 x,
                 grad_outputs=eps,
                 retain_graph=True,
                 create_graph=True)[0]
         if eps.shape[-1] == jvp.shape[-1]:
-            tr_jvp = torch.einsum('bi,bi->b', jvp, eps)
+            tr_vjp = torch.einsum('bi,bi->b', vjp, eps)
         else:
-            tr_jvp = torch.einsum('bi,bj->b', jvp, eps)
-        return tr_jvp
+            tr_vjp = torch.einsum('bi,bj->b', vjp, eps)
+        return tr_vjp
 
     def _minmax_critic_grad(self, net_outputs, critic_outputs, loss_func):
         """update direction \phi^*(x) for minmax amortized svgd"""
