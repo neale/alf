@@ -100,7 +100,7 @@ class HyperNetworkTest(parameterized.TestCase, alf.test.TestCase):
     def test_bayesian_linear_regression(self,
                                         par_vi='svgd3',
                                         particles=512,
-                                        train_batch_size=20):
+                                        train_batch_size=10):
         """
         The hypernetwork is trained to generate the parameter vector for a linear
         regressor. The target linear regressor is :math:`y = X\beta + e`, where 
