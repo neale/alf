@@ -33,7 +33,7 @@ class ParamConvNet(Network):
                  conv_layer_params,
                  same_padding=False,
                  activation=torch.relu_,
-                 use_bias=False,
+                 use_bias=True,
                  kernel_initializer=None,
                  flatten_output=False,
                  name="ParamConvNet"):

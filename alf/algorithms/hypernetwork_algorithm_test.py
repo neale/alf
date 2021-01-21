@@ -1,4 +1,4 @@
-# Copyright (c) 2020 Horizon Robotics. All Rights Reserved.
+# Copyright (c) 2020 Horizon Robotics and ALF Contributors. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -19,7 +19,6 @@ import torch.nn.functional as F
 
 import alf
 from alf.algorithms.hypernetwork_algorithm import HyperNetwork
-from alf.algorithms.hypernetwork_networks import ParamConvNet, ParamNetwork
 from alf.tensor_specs import TensorSpec
 from alf.utils import math_ops
 
@@ -55,8 +54,11 @@ class HyperNetworkTest(parameterized.TestCase, alf.test.TestCase):
         self.assertEqual(x.shape, y.shape)
         self.assertGreater(float(torch.min(x - y)), eps)
 
-    @parameterized.parameters(('gfsf'), ('svgd2'), ('svgd3'), ('minmax'),
-                              ('gfsf', True), ('svgd2', True), ('svgd3', True))
+    @parameterized.parameters(#('gfsf'), ('svgd2'),
+                              ('svgd3', False))# ('minmax'),
+                              #('gfsf', True),
+                              #('svgd2', True),
+                              #('svgd3', True))
     def test_bayesian_linear_regression(self,
                                         par_vi='minmax',
                                         function_vi=False,

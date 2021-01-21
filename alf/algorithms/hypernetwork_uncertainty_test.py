@@ -146,9 +146,9 @@ class HyperNetworkSampleTest(parameterized.TestCase, alf.test.TestCase):
         batch_size = train_nsamples
         inputs, targets = self.generate_class_data(train_nsamples)
         test_inputs, test_targets = self.generate_class_data(test_nsamples)
-        noise_dim = 24
-        hidden_size = 24
-        pinverse_iters = 2
+        noise_dim = 64
+        hidden_size = 64
+        pinverse_iters = 15
         algorithm = HyperNetwork(
             input_tensor_spec=input_spec,
             fc_layer_params=((10, True), (10, True)),
@@ -223,7 +223,7 @@ class HyperNetworkSampleTest(parameterized.TestCase, alf.test.TestCase):
                     tag += '_fvi/'
                 if functional_gradient:
                     tag += '_fg-vi/'
-                sub = '4cls_{}z_2h{}_net50_4lr_ad2e3_{}iter_orthof-nsq'.format(
+                sub = '4cls_{}z_2h{}_net82_4lr_ad2e3_{}iter_orthof-nsq'.format(
                     noise_dim, hidden_size, pinverse_iters)
                 tag += '{}/'.format(sub)
                 self.plot_classification(i, algorithm, tag)

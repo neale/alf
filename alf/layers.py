@@ -1073,7 +1073,7 @@ class ParamConv2D(nn.Module):
                  strides=1,
                  pooling_kernel=None,
                  padding=0,
-                 use_bias=False,
+                 use_bias=True,
                  kernel_initializer=None,
                  kernel_init_gain=1.0,
                  bias_init_value=0.0):

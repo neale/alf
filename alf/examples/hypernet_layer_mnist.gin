@@ -1,7 +1,7 @@
 import alf.algorithms.hypernetwork_layer_algorithm
 
 # dataset config
-create_dataset.dataset_name='mnist' #_inlier'
+create_dataset.dataset_name='mnist_inlier'
 create_dataset.train_batch_size=50
 create_dataset.test_batch_size=100
 
@@ -10,9 +10,9 @@ create_dataset.test_batch_size=100
 CONV_LAYER_PARAMS = ((6, 5, 1, 2, 4), (16, 5, 1, 0))
 #FC_LAYER_PARAMS = ((84, True), )
 FC_LAYER_PARAMS = ((144, True), )
-HIDDEN_LAYERS = (256,512,512)
+HIDDEN_LAYERS = (128,256)
 
-hypernet/Adam.lr=5e-3
+hypernet/Adam.lr=1e-2
 hypernet/Adam.weight_decay=1e-5
 hypernet_critic/Adam.lr=1e-3
 hypernet_critic/Adam.weight_decay=1e-4
@@ -22,7 +22,7 @@ HyperNetwork.conv_layer_params = %CONV_LAYER_PARAMS
 HyperNetwork.fc_layer_params=%FC_LAYER_PARAMS
 HyperNetwork.hidden_layers=%HIDDEN_LAYERS
 HyperNetwork.num_particles=10
-HyperNetwork.noise_dim=256
+HyperNetwork.noise_dim=128
 
 HyperNetwork.parameterization = 'network'
 # HyperNetwork.par_vi = 'minmax'
@@ -32,11 +32,12 @@ HyperNetwork.par_vi = 'svgd3'
 HyperNetwork.loss_type = 'classification'
 HyperNetwork.function_vi = False
 HyperNetwork.functional_gradient = False
-HyperNetwork.use_pinverse = False
-HyperNetwork.square_jac = False
+HyperNetwork.use_pinverse = True
+HyperNetwork.use_jac_regularization = False
+HyperNetwork.square_jac = True
 HyperNetwork.pinverse_resolve = False
 HyperNetwork.pinverse_use_eps = True
-HyperNetwork.pinverse_solve_iters = 1
+HyperNetwork.pinverse_solve_iters = 10
 HyperNetwork.function_bs = 50
 HyperNetwork.optimizer=@hypernet/Adam()
 HyperNetwork.critic_optimizer=@hypernet_critic/Adam()
@@ -44,8 +45,8 @@ HyperNetwork.critic_hidden_layers=(100,100)
 HyperNetwork.logging_training=True
 HyperNetwork.logging_evaluate=True
 
-import alf.algorithms.hypernetwork_networks
-ParamConvNet.use_bias=True
+#import alf.algorithms.hypernetwork_networks
+#ParamConvNet.use_bias=True
 
 import alf.algorithms.hypernetwork_layer_generator
 ParamLayers.use_bias=True

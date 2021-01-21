@@ -112,7 +112,7 @@ class HyperNetwork(Algorithm):
                  pinverse_solve_iters=1,
                  use_jac_regularization=False,
                  square_jac=True,
-                 parameterization='layer',
+                 parameterization='network',
                  loss_type="classification",
                  voting="soft",
                  par_vi="svgd",
@@ -303,7 +303,20 @@ class HyperNetwork(Algorithm):
         else:
             raise ValueError("Unsupported loss_type: %s" % loss_type)
 
-
+    def set_data_loader(self, train_loader, test_loader=None, outlier=None):
+        """ Set data loaders for training, testing, and uncertainty
+            quantification 
+        """
+        self._train_loader = train_loader
+        self._test_loader = test_loader
+        if outlier is not None:
+            assert isinstance(outlier, tuple), "outlier dataset must be " \
+                "provided in the format (outlier_train, outlier_test)"
+            self._outlier_train = outlier[0]
+            self._outlier_test = outlier[1]
+        else: 
+            self._outlier_train = self._outlier_test = None
+ 
     def set_num_particles(self, num_particles):
         """Set the number of particles to sample through one forward
         pass of the hypernetwork. """
@@ -357,7 +370,9 @@ class HyperNetwork(Algorithm):
             for batch_idx, (data, target) in enumerate(self._train_loader):
                 data = data.to(alf.get_default_device())
                 target = target.to(alf.get_default_device())
-                alg_step = self.train_step((data, target), state=state)
+                alg_step = self.train_step((data, target),
+                                           num_particles=num_particles,
+                                           state=state)
                 loss_info, params = self.update_with_gradient(alg_step.info)
                 loss += loss_info.extra.generator.loss
                 if self._functional_gradient:
@@ -406,6 +421,7 @@ class HyperNetwork(Algorithm):
                 loss_func=functools.partial(self._function_neglogprob,
                                             target.view(-1)),
                 batch_size=num_particles,
+                entropy_regularization=entropy_regularization,
                 transform_func=functools.partial(self._function_transform,
                                                  data),
                 state=())
@@ -514,8 +530,7 @@ class HyperNetwork(Algorithm):
             for i, (data, target) in enumerate(self._test_loader):
                 data = data.to(alf.get_default_device())
                 target = target.to(alf.get_default_device())
-                output, _ = self._param_net(data.double())  # [B, N, D]
-                #output, _ = self._param_net(data)  # [B, N, D]
+                output, _ = self._param_net(data)  # [B, N, D]
                 loss, extra = self._vote(output, target)
                 if self._loss_type == 'classification':
                     test_acc += extra.item()
@@ -587,6 +602,55 @@ class HyperNetwork(Algorithm):
                                             *target.shape[1:])
         total_loss = regression_loss(output, target)
         return loss, total_loss
+
+    def _auc_score(self, inliers, outliers):
+        """
+        Computes the AUROC score w.r.t network outputs. the ROC (curve) plots
+        true positive rate against false positive rate. Thus the area under
+        this curve gives the degree of separability between two dataset. 
+        An AUROC score of 1.0 means that the classifier means that the
+        classifier can totally discriminate between the two input datasets
+        
+        Args: 
+            inliers (np.array): set of predictions on inlier (training) data
+            outliers (np.array): set of predictions on outlier data
+        
+        Returns:
+            AUROC score 
+        """
+        y_true = np.array([0] * len(inliers) + [1] * len(outliers))
+        y_score = np.concatenate([inliers, outliers])
+        return roc_auc_score(y_true, y_score)
+    
+    def _predict_dataset(self, testset, predictor_size=None):
+        """
+        Computes predictions for an input dataset. 
+
+        Args: 
+            testset (iterable): dataset for which to get predictions
+            predictor_size (int): optional parameter indicating how many 
+                predictors are used in an ensemble. Useful for nonstandard
+                implementations.
+        Returns:
+            model_outputs (torch.tensor): a tensor of shape [N, S, D] where
+            N refers to the number of predictors, S is the number of data
+            points, and D is the output dimensionality. 
+        """
+        if hasattr(testset.dataset, 'dataset'):
+            cls = len(testset.dataset.dataset.classes)
+        else:
+            cls = len(testset.dataset.classes)
+        outputs = []
+        for batch, (data, target) in enumerate(testset):
+            data = data.to(alf.get_default_device())
+            target = target.to(alf.get_default_device())
+            output, _ = self._param_net(data)
+            if output.dim() == 2:
+                output = output.unsqueeze(1)
+            output = output.transpose(0, 1)
+            outputs.append(output)
+        model_outputs = torch.cat(outputs, dim=1)  # [N, B, D]
+        return model_outputs
 
     def summarize_train(self, loss_info, params, cum_loss=None, avg_acc=None):
         """Generate summaries for training & loss info after each gradient update.

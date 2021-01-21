@@ -65,21 +65,21 @@ class HyperNetworkTest(parameterized.TestCase, alf.test.TestCase):
         self.assertGreater(float(torch.min(x - y)), eps)
 
     @parameterized.parameters(
-                              #('gfsf', False, False),  #A-GFSF
-                              #('gfsf', True, False),  #A-GFSF-fv
-                              #('svgd3', False, False), # A-SVGD
-                              #('svgd3', True, False),  #A-SVGD-fv
-                              #('svgd3', False, True), #G-SVGD
-                              #('minmax', False, False), #A-minmax
-                              ('minmax', True, False),  #A-minmax-fv
-                              #('minmax', False, True),  #G-minmax
+                              ('gfsf', False, False),  #A-GFSF
+                              ('gfsf', True, False),  #A-GFSF-fv
+                              ('svgd3', False, False), # A-SVGD
+                              ('svgd3', True, False),  #A-SVGD-fv
+                              ('svgd3', False, True), #G-SVGD
+                              ('minmax', False, False), #A-minmax
+                              # ('minmax', True, False),  #A-minmax-fv
+                              ('minmax', False, True),  #G-minmax
     )
     def test_bayesian_linear_regression(self,
                                         par_vi='svgd3',
                                         function_vi=False,
                                         functional_gradient=False,
                                         train_batch_size=10,
-                                        num_particles=512):
+                                        num_particles=128):
         """
         The hypernetwork is trained to generate the parameter vector for a linear
         regressor. The target linear regressor is :math:`y = X\beta + e`, where 
@@ -114,7 +114,7 @@ class HyperNetworkTest(parameterized.TestCase, alf.test.TestCase):
             parameterization = 'network'
         else:
             hidden_layers = None
-            parameterization = 'layer'
+            parameterization = 'network'
 
         algorithm = HyperNetwork(
             input_spec,
@@ -135,7 +135,7 @@ class HyperNetworkTest(parameterized.TestCase, alf.test.TestCase):
             parameterization=parameterization,
             critic_hidden_layers=(hidden_size, hidden_size),
             critic_iter_num=5,
-            critic_l2_weight=1.0,
+            critic_l2_weight=10.0,
             optimizer=alf.optimizers.Adam(lr=lr),
             critic_optimizer=alf.optimizers.Adam(lr=lr))
         print("ground truth mean: {}".format(true_mean))
@@ -215,7 +215,7 @@ class HyperNetworkTest(parameterized.TestCase, alf.test.TestCase):
                 scov_err = scov_err / torch.norm(true_cov)
                 print("train_iter {}: sampled cov err {}".format(i, scov_err))
 
-        train_iter = 10000
+        train_iter = 5000
         for i in range(train_iter):
             _train(i)
             if i % 1000 == 0:

@@ -387,14 +387,14 @@ class Generator(Algorithm):
                                 eps_dim=eps_dim)
                         else:  # non-square, R^k
                             if pinverse_use_eps:
-                                self.pinverse = PinverseNet(noise_dim, output_dim, 50,
+                                self.pinverse = PinverseNet(noise_dim, output_dim, 100,
                                     eps_dim=noise_dim)
                             else: # just output J^{-1}
                                 self.pinverse = PinverseNet(noise_dim, output_dim*noise_dim, 150,
                                     eps_dim=None)
 
                         self.pinverse_optimizer = torch.optim.Adam(
-                            self.pinverse.parameters(), lr=1e-4)#, weight_decay=1e-5)
+                            self.pinverse.parameters(), lr=1e-5, weight_decay=1e-5)
 
                     elif pinverse_type == 'sor':  
                         # unused for now. successive over relaxation instead of network
@@ -961,6 +961,7 @@ class Generator(Algorithm):
             pinverse = self.pinverse
             pinverse_optimizer = self.pinverse_optimizer
         
+        jac_reg = None
         for _ in range(self._pinverse_solve_iters):
             if self._pinverse_resolve:
                 p = pinverse
@@ -974,6 +975,8 @@ class Generator(Algorithm):
                         z_batch = torch.repeat_interleave(z, eps.shape[1], dim=0)  # [B'*B, k]
                         p_batch = p.reshape(-1, p.shape[-1])  # [B'*B, D]
                         jac_y = self._net.compute_vjp(z_batch, p_batch)  # [B'*B, k]
+                        if self._use_jac_regularization:
+                            jac_reg = .1 * jac_y.norm(keepdim=True).mean()
                         jac_y = jac_y.reshape(eps.shape[0], eps.shape[1], -1)  # [B', B, k]
                         jac_y = torch.cat((jac_y,
                             torch.zeros(*eps.shape[:-1], eps.shape[-1]-jac_y.shape[-1])),  # [B', B, D]
@@ -998,7 +1001,7 @@ class Generator(Algorithm):
                 jac_y = self._net.compute_vjp(z_batch, jac_inv_eps_batch)
                 jac_y = jac_y.reshape_as(eps)  # [B', B, k]
 
-            loss = torch.nn.functional.mse_loss(jac_y, eps)
+            loss = torch.nn.functional.mse_loss(jac_y, eps)# + jac_reg
 
             pinverse_optimizer.zero_grad()
             loss.backward()
@@ -1013,7 +1016,7 @@ class Generator(Algorithm):
                 p = torch.einsum('ijk,iak->iaj', p_jac, eps)  # [B', B, D]
         else:
             p = pinverse
-        return p, loss
+        return p, loss, jac_reg
 
     def _svgd_grad3_functional(self,
                                inputs,
@@ -1066,7 +1069,7 @@ class Generator(Algorithm):
         # [N2, N], [N2, N, D]
         kernel_weight, kernel_grad = self._rbf_func2(z2, z)
         if self._use_pinverse:        
-            kernel_grad, pinverse_loss = self.pinverse_fn(z_pinverse_input, kernel_grad.detach())
+            kernel_grad, pinverse_loss, reg = self.pinverse_fn(z_pinverse_input, kernel_grad.detach())
         else:
             jac2_inv = torch.inverse(jac2_fz)
             kernel_grad = torch.einsum('ijk, iaj->iak', jac2_inv, kernel_grad) # [N2, N, D]
@@ -1087,8 +1090,7 @@ class Generator(Algorithm):
         loss_svgd = torch.sum(grad.detach() * outputs, dim=1)
         loss_propagated = loss_svgd
         if self._use_jac_regularization:
-            jac_reg = .1 * jac2_fz.norm(keepdim=True).mean()
-            loss_propagated = loss_propagated - jac_reg
+            loss_propagated = loss_propagated
         return (loss, pinverse_loss), loss_propagated
 
     
@@ -1133,16 +1135,20 @@ class Generator(Algorithm):
         tr_jvp = torch.einsum('bi,bi->b', jvp, eps)
         return tr_jvp
 
-    def _critic_train_step(self, inputs, loss_func, entropy_regularization=1.):
+    def _critic_train_step(self,
+                           inputs,
+                           loss_inputs,
+                           loss_func,
+                           entropy_regularization=1.):
         """
         Compute the loss for critic training.
         """
-        loss = loss_func(inputs)
+        loss = loss_func(loss_inputs)
         if isinstance(loss, tuple):
             neglogp = loss.loss
         else:
             neglogp = loss
-        loss_grad = torch.autograd.grad(neglogp.sum(), inputs)[0]  # [N, D]
+        loss_grad = torch.autograd.grad(neglogp.sum(), loss_inputs)[0]  # [N, D]
 
         if self._critic_relu_mlp:
             critic_step = self._critic.predict_step(
@@ -1153,7 +1159,7 @@ class Generator(Algorithm):
             outputs = self._critic.predict_step(inputs).output
             tr_gradf = self._jacobian_trace(outputs, inputs)  # [N]
 
-        f_loss_grad = (loss_grad.detach() * outputs).sum(1)  # [N]
+        f_loss_grad = (loss_grad.detach() * loss_inputs).sum(1)  # [N]
         loss_stein = f_loss_grad - entropy_regularization * tr_gradf  # [N]
 
         l2_penalty = (outputs * outputs).sum(1).mean() * self._critic_l2_weight
@@ -1220,9 +1226,13 @@ class Generator(Algorithm):
 
         # optimize the critic using resampled particles
         if transform_func is not None:
-            outputs, _ = transform_func(outputs)
+            outputs, extra_outputs, samples = transform_func(outputs)
+            aug_outputs = torch.cat([outputs, extra_outputs], dim=-1)
+        else:
+            aug_outputs = outputs
         if isinstance(outputs, tuple):
             ((outputs, jac), gen_inputs) = outputs
+            aug_outputs = outputs
 
         num_particles = outputs.shape[0]
 
@@ -1230,7 +1240,7 @@ class Generator(Algorithm):
 
             if self._minmax_resample:
                 if self._functional_gradient:
-                    z = torch.randn(num_particles, outputs.shape[-1])
+                    z = torch.randn(num_particles, aug_outputs.shape[-1])
                     noise = z[:, :self._noise_dim]
                     critic_inputs, gen_inputs = self._predict(
                         inputs, noise=noise, batch_size=num_particles, requires_jac=True)
@@ -1241,24 +1251,33 @@ class Generator(Algorithm):
                         inputs, batch_size=num_particles)
 
                 if transform_func is not None:
-                    critic_inputs, _ = transform_func(critic_inputs)
+                    critic_inputs, extra_outputs, _ = transform_func(critic_inputs)
+                    aug_critic_inputs = torch.cat([critic_inputs, extra_outputs], dim=-1)
+                else:
+                    aug_critic_inputs = critic_inputs
             else:
-                critic_inputs = outputs.detach().clone()
+                critic_inputs = aug_outputs.detach().clone()
                 critic_inputs.requires_grad = True
+                aug_inputs = critic_inputs
             
             if self._functional_gradient:
-                critic_loss = self._critic_train_step_f(critic_inputs, 
-                    jac, gen_inputs, loss_func, entropy_regularization)
+                critic_loss = self._critic_train_step_f(aug_critic_inputs,
+                                                        jac,
+                                                        gen_inputs,
+                                                        loss_func,
+                                                        entropy_regularization)
                 critic_loss, pinverse_loss = critic_loss
             else:
-                critic_loss = self._critic_train_step(critic_inputs, loss_func,
+                critic_loss = self._critic_train_step(aug_critic_inputs,
+                                                      critic_inputs,
+                                                      loss_func,
                                                       entropy_regularization)
             self._critic.update_with_gradient(LossInfo(loss=critic_loss))
 
         # compute amortized svgd
         loss = loss_func(outputs.detach())
-        critic_outputs = self._critic.predict_step(outputs.detach()).output
-        loss_propagated = torch.sum(-critic_outputs.detach() * outputs, dim=-1)
+        critic_outputs = self._critic.predict_step(aug_outputs.detach()).output
+        loss_propagated = torch.sum(-critic_outputs.detach() * aug_outputs, dim=-1)
         if self._functional_gradient and self._use_pinverse:
             loss = (loss, pinverse_loss)
         else:

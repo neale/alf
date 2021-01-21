@@ -1,4 +1,4 @@
-# Copyright (c) 2020 Horizon Robotics. All Rights Reserved.
+# Copyright (c) 2020 Horizon Robotics and ALF Contributors. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
 from absl import logging
 import functools
 import gin
+import math
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -25,8 +26,7 @@ from alf.algorithms.algorithm import Algorithm
 from alf.algorithms.config import TrainerConfig
 from alf.data_structures import AlgStep, LossInfo, namedtuple
 from alf.algorithms.generator import Generator
-from alf.algorithms.hypernetwork_networks import ParamNetwork
-from alf.networks import EncodingNetwork
+from alf.networks import EncodingNetwork, ParamNetwork
 from alf.tensor_specs import TensorSpec
 from alf.utils import common, math_ops, summary_utils
 from alf.utils.summary_utils import record_time
@@ -89,14 +89,17 @@ class HyperNetwork(Algorithm):
                  use_fc_bn=False,
                  num_particles=10,
                  entropy_regularization=1.,
+                 critic_optimizer=None,
+                 critic_hidden_layers=(100, 100),
+                 function_vi=False,
+                 function_bs=None,
+                 function_extra_bs_ratio=0.1,
+                 function_extra_bs_sampler='uniform',
+                 function_extra_bs_std=1.,
                  loss_type="classification",
                  voting="soft",
                  par_vi="svgd",
-                 function_vi=False,
                  optimizer=None,
-                 critic_optimizer=None,
-                 critic_hidden_layers=(100, 100),
-                 function_bs=None,
                  logging_network=False,
                  logging_training=False,
                  logging_evaluate=False,
@@ -136,12 +139,23 @@ class HyperNetwork(Algorithm):
             num_particles (int): number of sampling particles
             entropy_regularization (float): weight of entropy regularization
 
-            Args for the critic (used when par_vi is 'minmax')
+            Args for the critic (used when par_vi is ``minmax``)
             ====================================================================
             critic_optimizer (torch.optim.Optimizer): the optimizer for training critic.
             critic_hidden_layers (tuple): sizes of critic hidden layeres. 
+
+            Args for function_vi
+            ====================================================================
+            function_vi (bool): whether to use funciton value based par_vi, current
+                supported by [``svgd2``, ``svgd3``, ``gfsf``].
             function_bs (int): mini batch size for par_vi training. 
                 Needed for critic initialization when function_vi is True. 
+            function_extra_bs_ratio (float): ratio of extra sampled batch size 
+                w.r.t. the function_bs.
+            function_extra_bs_sampler (str): type of sampling method for extra
+                training batch, types are [``uniform``, ``normal``].
+            function_extra_bs_std (float): std of the normal distribution for
+                sampling extra training batch when using normal sampler.
 
             Args for training and testing
             ====================================================================
@@ -150,8 +164,24 @@ class HyperNetwork(Algorithm):
             voting (str): types of voting results from sampled functions,
                 types are [``soft``, ``hard``]
             par_vi (str): types of particle-based methods for variational inference,
-                types are [``svgd``, ``svgd2``, ``svgd3``, ``gfsf``]
-            function_vi (bool): whether to use funciton value based par_vi.
+                types are [``svgd``, ``svgd2``, ``svgd3``, ``gfsf``, ``minmax``],
+                * svgd: empirical expectation of SVGD is evaluated by a single 
+                    resampled particle. The main benefit of this choice is it 
+                    supports conditional case, while all other options do not.
+                * svgd2: empirical expectation of SVGD is evaluated by splitting
+                    half of the sampled batch. It is a trade-off between 
+                    computational efficiency and convergence speed.
+                * svgd3: empirical expectation of SVGD is evaluated by 
+                    resampled particles of the same batch size. It has better
+                    convergence but involves resampling, so less efficient
+                    computaionally comparing with svgd2.
+                * gfsf: wasserstein gradient flow with smoothed functions. It 
+                    involves a kernel matrix inversion, so computationally most
+                    expensive, but in some case the convergence seems faster 
+                    than svgd approaches.
+                * minmax: Fisher Neural Sampler, optimal descent direction of
+                    the Stein discrepancy is solved by an inner optimization
+                    procedure in the space of L2 neural networks.
             optimizer (torch.optim.Optimizer): The optimizer for training generator.
             logging_network (bool): whether logging the archetectures of networks.
             logging_training (bool): whether logging loss and acc during training.
@@ -192,9 +222,19 @@ class HyperNetwork(Algorithm):
             par_vi = 'svgd3'
 
         if function_vi:
+            assert par_vi in ('svgd2', 'svgd3', 'gfsf'), (
+                "Function_vi is not support for par_vi method: %s" % par_vi)
             assert function_bs is not None, (
-                "need to specify batch_size of function outputs.")
-            critic_input_dim = function_bs * last_layer_param[0]
+                "Need to specify batch_size of function outputs.")
+            assert function_extra_bs_sampler in ('uniform', 'normal'), (
+                "Unsupported sampling type %s for extra training batch" %
+                (function_extra_bs_sampler))
+            self._function_extra_bs = math.ceil(
+                function_bs * function_extra_bs_ratio)
+            self._function_extra_bs_sampler = function_extra_bs_sampler
+            self._function_extra_bs_std = function_extra_bs_std
+            critic_input_dim = (
+                function_bs + self._function_extra_bs) * last_layer_param[0]
         else:
             critic_input_dim = gen_output_dim
 
@@ -355,6 +395,7 @@ class HyperNetwork(Algorithm):
             num_particles = self._num_particles
         if entropy_regularization is None:
             entropy_regularization = self._entropy_regularization
+
         if self._function_vi:
             data, target = inputs
             return self._generator.train_step(
@@ -381,19 +422,44 @@ class HyperNetwork(Algorithm):
 
         Args:
             data (torch.Tensor): training batch input.
-            params (torch.Tensor): sampled outputs from the generator.
+            params: tensor params or tuple of tensors (params, extra_samples)
+                - params: of shape ``[D]`` or ``[B, D]``, sampled outputs 
+                    from the generator
+                - extra_samples: sampled extra data
 
         Returns:
             outputs (torch.Tensor): outputs of param_net under params
                 evaluated on data.
+            density_outputs (torch.Tensor): outputs of param_net under
+                params evaluated on sampled extra data.
+            extra_samples (torch.Tensor): sampled extra data.
         """
+        # sample extra data
+        if isinstance(params, tuple):
+            params, extra_samples = params
+        else:
+            sample = data[-self._function_extra_bs:]
+            noise = torch.zeros_like(sample)
+            if self._function_extra_bs_sampler == 'uniform':
+                noise.uniform_(0., 1.)
+            else:
+                noise.normal_(mean=0., std=self._function_extra_bs_std)
+            extra_samples = sample + noise
+
         num_particles = params.shape[0]
         self._param_net.set_parameters(params)
-        outputs, _ = self._param_net(data)  # [B, P, D]
+        aug_data = torch.cat([data, extra_samples], dim=0)
+        aug_outputs, _ = self._param_net(aug_data)  # [B+b, P, D]
+
+        outputs = aug_outputs[:data.shape[0]]  # [B, P, D]
         outputs = outputs.transpose(0, 1)
         outputs = outputs.view(num_particles, -1)  # [P, B * D]
 
-        return outputs
+        density_outputs = aug_outputs[-extra_samples.shape[0]:]  # [b, P, D]
+        density_outputs = density_outputs.transpose(0, 1)
+        density_outputs = density_outputs.view(num_particles, -1)
+
+        return outputs, density_outputs, extra_samples
 
     def _function_neglogprob(self, targets, outputs):
         """
