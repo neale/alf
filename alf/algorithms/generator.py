@@ -193,7 +193,8 @@ class PinverseNet(torch.nn.Module):
             x_joint = torch.cat((x_z, x_eps), dim=-1)
             x = torch.nn.functional.relu(self.linear_joint(x_joint))
             x = torch.nn.functional.relu(self.linear_hidden(x))
-            output = self.linear_out(x).reshape_as(eps)
+            output = self.linear_out(x).reshape(
+                b2_dim, eps.shape[1], -1)
 
         else:  # J^{-1}
             x_z = torch.nn.functional.relu(self.linear_z(z))
@@ -273,7 +274,7 @@ class Generator(Algorithm):
                  pinverse_resolve=False,
                  pinverse_solve_iters=1,
                  pinverse_batch_size=None,
-                 pinverse_use_eps=True,
+                 pinverse_use_eps=False,
                  use_jac_regularization=False,
                  square_jac=True,
                  critic_input_dim=None,
@@ -377,22 +378,24 @@ class Generator(Algorithm):
                 self._pinverse_solve_iters = pinverse_solve_iters
                 if not pinverse_resolve:
                     if pinverse_type == 'network':
-                        if self._square_jac:
+                        if self._square_jac:  # R^d
                             if par_vi == 'svgd3':
                                 eps_dim = output_dim
                             elif par_vi == 'minmax':
                                 eps_dim = output_dim * output_dim
-                            self.pinverse = PinverseNet(output_dim, eps_dim, 100,
+                            self.pinverse = PinverseNet(noise_dim, eps_dim, 100,
                                 eps_dim=eps_dim)
-                        else:
+                        else:  # non-square, R^k
                             if pinverse_use_eps:
-                                self.pinverse = PinverseNet(noise_dim, output_dim, 10,
+                                self.pinverse = PinverseNet(noise_dim, output_dim, 50,
                                     eps_dim=noise_dim)
-                            else:
+                            else: # just output J^{-1}
                                 self.pinverse = PinverseNet(noise_dim, output_dim*noise_dim, 150,
                                     eps_dim=None)
+
                         self.pinverse_optimizer = torch.optim.Adam(
-                            self.pinverse.parameters(), lr=1e-4, weight_decay=1e-5)
+                            self.pinverse.parameters(), lr=1e-4)#, weight_decay=1e-5)
+
                     elif pinverse_type == 'sor':  
                         # unused for now. successive over relaxation instead of network
                         self.pinverse = None
@@ -962,26 +965,38 @@ class Generator(Algorithm):
             if self._pinverse_resolve:
                 p = pinverse
                 jac_y = torch.einsum('ijk,iak->iaj', jac, p)
+
             elif (not self._pinverse_resolve) and self.pinverse.eps_dim is not None:
-                p = pinverse(z, eps)
+                p = pinverse(z, eps)  # [B', B, D]
+
                 if self._square_jac:
                     if eps.shape[0] == eps.shape[1]:  # for ``svgd3``
-                        jac_y = torch.einsum('ijk,iak->iaj', jac, p)
-                    elif eps.shape[1] == eps.shape[2]:  # for ``minmax``
+                        z_batch = torch.repeat_interleave(z, eps.shape[1], dim=0)  # [B'*B, k]
+                        p_batch = p.reshape(-1, p.shape[-1])  # [B'*B, D]
+                        jac_y = self._net.compute_vjp(z_batch, p_batch)  # [B'*B, k]
+                        jac_y = jac_y.reshape(eps.shape[0], eps.shape[1], -1)  # [B', B, k]
+                        jac_y = torch.cat((jac_y,
+                            torch.zeros(*eps.shape[:-1], eps.shape[-1]-jac_y.shape[-1])),  # [B', B, D]
+                            dim=-1)
+                        jac_y.add_(eps)  # [B', B, D]
+                    
+                    elif eps.shape[1] == eps.shape[2]:  # for ``minmax``, not changed from before
                         jac_y = torch.bmm(jac, p)
-                else:  # vjp
-                    z_batch = torch.repeat_interleave(z, eps.shape[1], dim=0)
-                    p_batch = p.reshape(-1, p.shape[-1])
-                    jac_y = self._net.compute_vjp(z_batch, p_batch)
-                    jac_y = jac_y.reshape_as(eps)  # [B', B, K]
-
-            elif (not self._pinverse_resolve) and self.pinverse.eps_dim is None: # vjp and small pinverse
-                p = pinverse(z)
-                z_batch = torch.repeat_interleave(z, eps.shape[1], dim=0)
-                p = torch.einsum('ijk,iak->iaj', p, eps)  # [B', B, K]
+                
+                else:  # (non-square jac)
+                    z_batch = torch.repeat_interleave(z, eps.shape[1], dim=0)  # [B'*B, k]
+                    p_batch = p.reshape(-1, p.shape[-1])  # [B'*B, D]
+                    jac_y = self._net.compute_vjp(z_batch, p_batch)  # [B'*B, k]
+                    jac_y = jac_y.reshape(eps.shape[0], eps.shape[1], -1)  # [B', B, k]
+            
+            # pinverse estimates only J^{-1}
+            elif (not self._pinverse_resolve) and self.pinverse.eps_dim is None: 
+                p_jac = pinverse(z)  # [B', D, k]
+                p = torch.einsum('ijk,iak->iaj', p_jac, eps)  # [B', B, D]
+                z_batch = torch.repeat_interleave(z, eps.shape[1], dim=0)  # [B'*B, k]
                 jac_inv_eps_batch = p.reshape(-1, p.shape[-1])
                 jac_y = self._net.compute_vjp(z_batch, jac_inv_eps_batch)
-                jac_y = jac_y.reshape_as(eps)
+                jac_y = jac_y.reshape_as(eps)  # [B', B, k]
 
             loss = torch.nn.functional.mse_loss(jac_y, eps)
 
@@ -991,7 +1006,11 @@ class Generator(Algorithm):
             pinverse_optimizer.step()
 
         if not self._pinverse_resolve:
-            p = pinverse(z, eps) # [B', B, K]
+            if self._square_jac:
+                p = pinverse(z, eps) # [B', B, K]
+            else:
+                p_jac = pinverse(z)
+                p = torch.einsum('ijk,iak->iaj', p_jac, eps)  # [B', B, D]
         else:
             p = pinverse
         return p, loss
@@ -1021,34 +1040,33 @@ class Generator(Algorithm):
         _lambda = 1.0
         
         if (self._noise_dim < z_shape) and (self._square_jac):  #
+            # get z' outputs
             z2 = torch.randn(num_particles, z_shape, requires_grad=True)
             inputs2 = z2[:, :self._noise_dim]
-            outputs2, jac = self._net(inputs2, requires_jac=True)[0]  
+            outputs2 = self._net(inputs2)[0]  
             outputs2.add_(_lambda * z2)
+            z_pinverse_input = inputs2.detach()
             
             # get z outputs
             z = torch.randn(num_particles, z_shape, requires_grad=True) # [N, D]
             inputs = z[:, :self._noise_dim]  # [N, k]
             outputs = self._net(inputs)[0]# + z # [N, k]
             
-            zero_vec = torch.zeros(num_particles, z_shape, z_shape-self._noise_dim)
-            id = torch.eye(z_shape)
-            jac2_fz = torch.cat((jac, zero_vec), dim=-1)
-            jac2_fz.add_(_lambda * id)
-        
         elif (self._noise_dim == z_shape) or (not self._square_jac):
             z = gen_inputs
-            z2 = torch.randn(num_particles, self._noise_dim, requires_grad=True)
-            if self._square_jac:
-                outputs2, jac2_fz = self._net(z2, requires_jac=True)[0]  # f(z'), df/dz
-            else:
-                outputs2 = self._net(z2)[0]  # f(z'), df/dz
-                jac2_fz = None
+            outputs = self._net(z)[0]# + z # [N, k]
+
+            z2_full = torch.randn(num_particles, z_shape, requires_grad=True)
+            z2 = z2_full[:, :self._noise_dim]
+            outputs2 = self._net(z2)[0]  # f(z'), df/dz
+            outputs2.add_(_lambda * z2_full)
+            z_pinverse_input = z2.detach()
+            jac2_fz = None
 
         # [N2, N], [N2, N, D]
         kernel_weight, kernel_grad = self._rbf_func2(z2, z)
         if self._use_pinverse:        
-            kernel_grad, pinverse_loss = self.pinverse_fn(z2.detach(), kernel_grad.detach(), jac2_fz.detach())
+            kernel_grad, pinverse_loss = self.pinverse_fn(z_pinverse_input, kernel_grad.detach())
         else:
             jac2_inv = torch.inverse(jac2_fz)
             kernel_grad = torch.einsum('ijk, iaj->iak', jac2_inv, kernel_grad) # [N2, N, D]

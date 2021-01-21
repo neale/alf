@@ -45,7 +45,7 @@ class SimpleFC(nn.Linear):
         super().__init__(input_size, output_size, bias=bias)
         self._activation = activation
         self._hidden_neurons = None
-        # torch.nn.init.orthogonal_(self.weight)
+        torch.nn.init.orthogonal_(self.weight)
 
     @property
     def hidden_neurons(self):
@@ -69,6 +69,7 @@ class ReluMLP(Network):
                  bias=True,
                  hidden_layers=(64, 64),
                  activation=torch.relu_,
+                 use_spectral_norm=False,
                  name="ReluMLP"):
         """Create a ReluMLP.
 
@@ -104,6 +105,9 @@ class ReluMLP(Network):
 
         last_fc = SimpleFC(input_size, self._output_size, bias=bias, activation=identity)
         self._fc_layers.append(last_fc)
+        if use_spectral_norm:
+            for layer in self._fc_layers:
+                layer = sn(layer)
 
     def forward(self, 
                 inputs,
