@@ -164,7 +164,7 @@ class HyperNetworkSampleTest(parameterized.TestCase, alf.test.TestCase):
             functional_gradient=functional_gradient,
             use_pinverse=True,
             pinverse_solve_iters=pinverse_iters,
-            pinverse_use_eps=False,
+            pinverse_use_eps=True,
             square_jac=False,
             pinverse_batch_size=num_particles,
             parameterization=parameterization,
@@ -223,7 +223,7 @@ class HyperNetworkSampleTest(parameterized.TestCase, alf.test.TestCase):
                     tag += '_fvi/'
                 if functional_gradient:
                     tag += '_fg-vi/'
-                sub = '4cls_{}z_2h{}_net50_4lr_ad2e3_{}iter_sn-orthof'.format(
+                sub = '4cls_{}z_2h{}_net50_4lr_ad2e3_{}iter_orthof-nsq'.format(
                     noise_dim, hidden_size, pinverse_iters)
                 tag += '{}/'.format(sub)
                 self.plot_classification(i, algorithm, tag)

@@ -274,7 +274,7 @@ class Generator(Algorithm):
                  pinverse_resolve=False,
                  pinverse_solve_iters=1,
                  pinverse_batch_size=None,
-                 pinverse_use_eps=False,
+                 pinverse_use_eps=True,
                  use_jac_regularization=False,
                  square_jac=True,
                  critic_input_dim=None,
@@ -1008,7 +1008,7 @@ class Generator(Algorithm):
         if not self._pinverse_resolve:
             if self._square_jac:
                 p = pinverse(z, eps) # [B', B, K]
-            else:
+            elif (not self._square_jac) and self.pinverse.eps_dim is None:
                 p_jac = pinverse(z)
                 p = torch.einsum('ijk,iak->iaj', p_jac, eps)  # [B', B, D]
         else:
