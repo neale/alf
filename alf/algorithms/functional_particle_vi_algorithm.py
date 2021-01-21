@@ -20,6 +20,8 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from typing import Callable
+from scipy.stats import entropy as entropy_fn
+from sklearn.metrics import roc_auc_score
 
 import alf
 from alf.algorithms.algorithm import Algorithm
@@ -248,7 +250,7 @@ class FuncParVIAlgorithm(ParVIAlgorithm):
         else:
             raise ValueError("Unsupported loss_type: %s" % loss_type)
 
-    def set_data_loader(self, train_loader, test_loader=None):
+    def set_data_loader(self, train_loader, test_loader=None, outlier=None):
         """Set data loadder for training and testing.
 
         Args:
@@ -258,7 +260,14 @@ class FuncParVIAlgorithm(ParVIAlgorithm):
         self._train_loader = train_loader
         self._test_loader = test_loader
         self._entropy_regularization = 1 / len(train_loader)
-
+        if outlier is not None:
+            assert isinstance(outlier, tuple), "outlier dataset must be " \
+                "provided in the format (outlier_train, outlier_test)"
+            self._outlier_train = outlier[0]
+            self._outlier_test = outlier[1]
+        else: 
+            self._outlier_train = self._outlier_test = None
+ 
     def predict_step(self, inputs, params=None, state=None):
         """Predict ensemble outputs for inputs using the hypernetwork model.
 
@@ -509,6 +518,69 @@ class FuncParVIAlgorithm(ParVIAlgorithm):
                                             *target.shape[1:])
         total_loss = regression_loss(output, target)
         return loss, total_loss
+    
+    def eval_uncertainty(self):
+        # Soft voting for now
+        with torch.no_grad():
+            outputs = self._predict_dataset(self._test_loader)
+        probs = F.softmax(outputs, -1).mean(0)
+        entropy = entropy_fn(probs.T.cpu().detach().numpy())
+        with torch.no_grad():
+            outputs_outlier = self._predict_dataset(self._outlier_test)
+        probs_outlier = F.softmax(outputs_outlier, -1).mean(0)
+        entropy_outlier = entropy_fn(probs_outlier.T.cpu().detach().numpy())
+        auroc_entropy = self._auc_score(entropy, entropy_outlier)
+        logging.info("AUROC score: {}".format(auroc_entropy))
+
+
+    def _auc_score(self, inliers, outliers):
+        """
+        Computes the AUROC score w.r.t network outputs. the ROC (curve) plots
+        true positive rate against false positive rate. Thus the area under
+        this curve gives the degree of separability between two dataset. 
+        An AUROC score of 1.0 means that the classifier means that the
+        classifier can totally discriminate between the two input datasets
+        
+        Args: 
+            inliers (np.array): set of predictions on inlier (training) data
+            outliers (np.array): set of predictions on outlier data
+        
+        Returns:
+            AUROC score 
+        """
+        y_true = np.array([0] * len(inliers) + [1] * len(outliers))
+        y_score = np.concatenate([inliers, outliers])
+        return roc_auc_score(y_true, y_score)
+    
+    def _predict_dataset(self, testset):
+        """
+        Computes predictions for an input dataset. 
+
+        Args: 
+            testset (iterable): dataset for which to get predictions
+            predictor_size (int): optional parameter indicating how many 
+                predictors are used in an ensemble. Useful for nonstandard
+                implementations.
+        Returns:
+            model_outputs (torch.tensor): a tensor of shape [N, S, D] where
+            N refers to the number of predictors, S is the number of data
+            points, and D is the output dimensionality. 
+        """
+        if hasattr(testset.dataset, 'dataset'):
+            cls = len(testset.dataset.dataset.classes)
+        else:
+            cls = len(testset.dataset.classes)
+        outputs = []
+        for batch, (data, target) in enumerate(testset):
+            data = data.to(alf.get_default_device())
+            target = target.to(alf.get_default_device())
+            output, _ = self._param_net(data)
+            if output.dim() == 2:
+                output = output.unsqueeze(1)
+            output = output.transpose(0, 1)
+            outputs.append(output)
+        model_outputs = torch.cat(outputs, dim=1)  # [N, B, D]
+        return model_outputs
 
     def summarize_train(self, loss_info, params, cum_loss=None, avg_acc=None):
         """Generate summaries for training & loss info after each gradient update.

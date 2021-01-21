@@ -383,7 +383,7 @@ class Generator(Algorithm):
                                 eps_dim = output_dim
                             elif par_vi == 'minmax':
                                 eps_dim = output_dim * output_dim
-                            self.pinverse = PinverseNet(noise_dim, eps_dim, 100,
+                            self.pinverse = PinverseNet(noise_dim, eps_dim, 512,
                                 eps_dim=eps_dim)
                         else:  # non-square, R^k
                             if pinverse_use_eps:
