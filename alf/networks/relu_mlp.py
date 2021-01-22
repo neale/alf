@@ -45,7 +45,7 @@ class SimpleFC(nn.Linear):
         super().__init__(input_size, output_size, bias=bias)
         self._activation = activation
         self._hidden_neurons = None
-        torch.nn.init.orthogonal_(self.weight)
+        #torch.nn.init.orthogonal_(self.weight)
 
     @property
     def hidden_neurons(self):

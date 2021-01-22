@@ -161,6 +161,7 @@ class PinverseNet(torch.nn.Module):
             self.linear_eps = torch.nn.Linear(eps_dim, hidden_size)
             self.linear_joint = torch.nn.Linear(hidden_size*joint_terms, hidden_size*joint_terms)
             self.linear_hidden = torch.nn.Linear(hidden_size*joint_terms, hidden_size*joint_terms)
+            self.linear_h2 = torch.nn.Linear(hidden_size*joint_terms, hidden_size*joint_terms)
             self.linear_out = torch.nn.Linear(hidden_size*joint_terms, self.output_dim)
         else:
             self.linear_hidden = torch.nn.Linear(hidden_size, hidden_size*2)
@@ -188,12 +189,13 @@ class PinverseNet(torch.nn.Module):
                 z = torch.repeat_interleave(z, eps.shape[1], dim=0)
             elif eps.shape[1] == eps.shape[2]:  # minmax
                 eps_batch = eps.reshape(eps.shape[0], -1)
-            x_z = torch.nn.functional.relu(self.linear_z(z))
+            x_z = self.linear_z(z)
             x_eps = self.linear_eps(eps_batch)
             x_joint = torch.cat((x_z, x_eps), dim=-1)
-            x = torch.nn.functional.relu(self.linear_joint(x_joint))
-            x = torch.nn.functional.relu(self.linear_hidden(x))
-            output = self.linear_out(x).reshape(
+            x_joint = torch.nn.functional.relu(x_joint)
+            #x = torch.nn.functional.relu(self.linear_joint(x_joint))
+            #x = torch.nn.functional.relu(self.linear_hidden(x))
+            output = self.linear_out(x_joint).reshape(
                 b2_dim, eps.shape[1], -1)
 
         else:  # J^{-1}
@@ -271,6 +273,7 @@ class Generator(Algorithm):
                  functional_gradient=False,
                  use_pinverse=False,
                  pinverse_type='network',
+                 pinverse_hidden_size=10,
                  pinverse_resolve=False,
                  pinverse_solve_iters=1,
                  pinverse_batch_size=None,
@@ -383,18 +386,27 @@ class Generator(Algorithm):
                                 eps_dim = output_dim
                             elif par_vi == 'minmax':
                                 eps_dim = output_dim * output_dim
-                            self.pinverse = PinverseNet(noise_dim, eps_dim, 512,
+                            self.pinverse = PinverseNet(
+                                noise_dim,
+                                eps_dim,
+                                pinverse_hidden_size,
                                 eps_dim=eps_dim)
                         else:  # non-square, R^k
                             if pinverse_use_eps:
-                                self.pinverse = PinverseNet(noise_dim, output_dim, 100,
+                                self.pinverse = PinverseNet(
+                                    noise_dim,
+                                    output_dim,
+                                    pinverse_hidden_size,
                                     eps_dim=noise_dim)
                             else: # just output J^{-1}
-                                self.pinverse = PinverseNet(noise_dim, output_dim*noise_dim, 150,
+                                self.pinverse = PinverseNet(
+                                    noise_dim,
+                                    output_dim*noise_dim,
+                                    pinverse_hidden_size,
                                     eps_dim=None)
 
                         self.pinverse_optimizer = torch.optim.Adam(
-                            self.pinverse.parameters(), lr=1e-4, weight_decay=1e-5)
+                            self.pinverse.parameters(), lr=1e-4)#, weight_decay=1e-5)
 
                     elif pinverse_type == 'sor':  
                         # unused for now. successive over relaxation instead of network
@@ -1005,7 +1017,7 @@ class Generator(Algorithm):
 
             pinverse_optimizer.zero_grad()
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(pinverse.parameters(), 1.)
+            #torch.nn.utils.clip_grad_norm_(pinverse.parameters(), 1.)
             pinverse_optimizer.step()
 
         if not self._pinverse_resolve:
@@ -1065,7 +1077,8 @@ class Generator(Algorithm):
         # [N2, N], [N2, N, D]
         kernel_weight, kernel_grad = self._rbf_func2(z2, z)
         if self._use_pinverse:        
-            kernel_grad, pinverse_loss, reg = self.pinverse_fn(z2, kernel_grad)
+            kernel_grad, pinverse_loss, reg = self.pinverse_fn(
+                z_pinverse_input.detach(), kernel_grad.detach())
         else:
             jac2_inv = torch.inverse(jac2_fz)
             kernel_grad = torch.einsum('ijk, iaj->iak', jac2_inv, kernel_grad) # [N2, N, D]
@@ -1083,6 +1096,7 @@ class Generator(Algorithm):
                                    loss_grad) / num_particles  # [N, D]
         
         grad = kernel_logp - entropy_regularization * kernel_grad.mean(0)
+        print ('klogp', kernel_logp.norm().item(), 'y', kernel_grad.norm().item())
         loss_svgd = torch.sum(grad.detach() * outputs, dim=1)
         loss_propagated = loss_svgd
         if self._use_jac_regularization:

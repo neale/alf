@@ -78,11 +78,11 @@ class HyperNetworkSampleTest(parameterized.TestCase, alf.test.TestCase):
         gridx, gridy = torch.meshgrid(x, y)
         grid = torch.stack((gridx.reshape(-1), gridy.reshape(-1)), -1)
         
-        #noise_d = torch.distributions.Normal(torch.tensor([0]), torch.tensor([1.]))
-        #noise = noise_d.icdf(torch.linspace(1e-3, 1-1e-3, 512))
-        #params = algorithm.sample_parameters(noise=noise, num_particles=512)
-        #outputs = algorithm.predict_step(grid, params=params).output.cpu()
-        outputs = algorithm.predict_step(grid, num_particles=512).output.cpu()
+        noise_d = torch.distributions.Normal(torch.tensor([0]), torch.tensor([1.]))
+        noise = noise_d.icdf(torch.linspace(1e-3, 1-1e-3, 512))
+        params = algorithm.sample_parameters(noise=noise, num_particles=512)
+        outputs = algorithm.predict_step(grid, params=params).output.cpu()
+        #outputs = algorithm.predict_step(grid, num_particles=512).output.cpu()
         outputs = F.softmax(outputs, -1).detach()  # [B, D]
         mean_outputs = outputs.mean(1).cpu()  # [B, D]
         std_outputs = outputs.std(1).cpu()
@@ -143,12 +143,15 @@ class HyperNetworkSampleTest(parameterized.TestCase, alf.test.TestCase):
         
         train_nsamples = 100
         test_nsamples = 200
-        batch_size = train_nsamples
+        batch_size = train_nsamples // 10
         inputs, targets = self.generate_class_data(train_nsamples)
         test_inputs, test_targets = self.generate_class_data(test_nsamples)
-        noise_dim = 64
-        hidden_size = 64
-        pinverse_iters = 15
+        noise_dim = 50
+        hidden_size = 50
+        pinverse_hidden_size = 92
+        pinverse_iters = 1
+        lr = 1e-3
+        weight_decay = 0.
         algorithm = HyperNetwork(
             input_tensor_spec=input_spec,
             fc_layer_params=((10, True), (10, True)),
@@ -165,12 +168,13 @@ class HyperNetworkSampleTest(parameterized.TestCase, alf.test.TestCase):
             use_pinverse=True,
             pinverse_solve_iters=pinverse_iters,
             pinverse_use_eps=True,
+            pinverse_hidden_size=pinverse_hidden_size,
             square_jac=False,
             pinverse_batch_size=num_particles,
             parameterization=parameterization,
-            optimizer=alf.optimizers.Adam(lr=2e-3),#, weight_decay=1e-4),
+            optimizer=alf.optimizers.Adam(lr=lr, weight_decay=weight_decay),
             critic_hidden_layers=(hidden_size, hidden_size),
-            critic_optimizer=alf.optimizers.Adam(lr=1e-3))
+            critic_optimizer=alf.optimizers.Adam(lr=lr))
         
         def _train(i, entropy_regularization=None):
             perm = torch.randperm(train_nsamples)
@@ -178,7 +182,7 @@ class HyperNetworkSampleTest(parameterized.TestCase, alf.test.TestCase):
             train_inputs = inputs[idx]
             train_targets = targets[idx]
             if entropy_regularization is None:
-                entropy_regularization = train_batch_size / batch_size
+                entropy_regularization = (train_batch_size / batch_size)
             
             alg_step = algorithm.train_step(
                 inputs=(train_inputs, train_targets),
@@ -223,8 +227,8 @@ class HyperNetworkSampleTest(parameterized.TestCase, alf.test.TestCase):
                     tag += '_fvi/'
                 if functional_gradient:
                     tag += '_fg-vi/'
-                sub = '4cls_{}z_2h{}_net82_4lr_ad2e3_{}iter_orthof-nsq'.format(
-                    noise_dim, hidden_size, pinverse_iters)
+                sub = '4cls_{}z_2h{}_pnet{}+nohj_40lr_ad{}w{}_{}iter_nsq'.format(
+                    noise_dim, hidden_size, pinverse_hidden_size, lr, weight_decay, pinverse_iters)
                 tag += '{}/'.format(sub)
                 self.plot_classification(i, algorithm, tag)
            
