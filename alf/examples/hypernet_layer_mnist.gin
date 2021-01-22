@@ -12,9 +12,9 @@ FC_LAYER_PARAMS = ((84, True), )
 # FC_LAYER_PARAMS = ((144, True), )
 HIDDEN_LAYERS = (128,512)
 
-hypernet/Adam.lr=1e-4
-hypernet/Adam.weight_decay=1e-5
-hypernet_critic/Adam.lr=1e-3
+hypernet/Adam.lr=5e-3
+hypernet/Adam.weight_decay=1e-4
+hypernet_critic/Adam.lr=1e-4
 hypernet_critic/Adam.weight_decay=1e-4
 
 # algorithm config

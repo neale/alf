@@ -394,7 +394,7 @@ class Generator(Algorithm):
                                     eps_dim=None)
 
                         self.pinverse_optimizer = torch.optim.Adam(
-                            self.pinverse.parameters(), lr=1e-5, weight_decay=1e-5)
+                            self.pinverse.parameters(), lr=1e-4, weight_decay=1e-5)
 
                     elif pinverse_type == 'sor':  
                         # unused for now. successive over relaxation instead of network
@@ -1005,13 +1005,13 @@ class Generator(Algorithm):
 
             pinverse_optimizer.zero_grad()
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(pinverse.parameters(), 5.)
+            torch.nn.utils.clip_grad_norm_(pinverse.parameters(), 1.)
             pinverse_optimizer.step()
 
         if not self._pinverse_resolve:
-            if self._square_jac:
+            if self.pinverse.eps_dim is not None:
                 p = pinverse(z, eps) # [B', B, K]
-            elif (not self._square_jac) and self.pinverse.eps_dim is None:
+            else:
                 p_jac = pinverse(z)
                 p = torch.einsum('ijk,iak->iaj', p_jac, eps)  # [B', B, D]
         else:
@@ -1057,19 +1057,15 @@ class Generator(Algorithm):
             
         elif (self._noise_dim == z_shape) or (not self._square_jac):
             z = gen_inputs
-            outputs = self._net(z)[0]# + z # [N, k]
-
-            z2_full = torch.randn(num_particles, z_shape, requires_grad=True)
-            z2 = z2_full[:, :self._noise_dim]
+            z2 = torch.randn(num_particles, self._noise_dim, requires_grad=True)
             outputs2 = self._net(z2)[0]  # f(z'), df/dz
-            outputs2.add_(_lambda * z2_full)
-            z_pinverse_input = z2.detach()
+            z_pinverse_input = z2
             jac2_fz = None
 
         # [N2, N], [N2, N, D]
         kernel_weight, kernel_grad = self._rbf_func2(z2, z)
         if self._use_pinverse:        
-            kernel_grad, pinverse_loss, reg = self.pinverse_fn(z_pinverse_input, kernel_grad.detach())
+            kernel_grad, pinverse_loss, reg = self.pinverse_fn(z2, kernel_grad)
         else:
             jac2_inv = torch.inverse(jac2_fz)
             kernel_grad = torch.einsum('ijk, iaj->iak', jac2_inv, kernel_grad) # [N2, N, D]
