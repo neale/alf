@@ -66,6 +66,11 @@ class CriticAlgorithm(Algorithm):
             use_relu_mlp (bool): whether use ReluMLP as default net constrctor.
                 Diagonals of Jacobian can be explicitly computed for ReluMLP.
             use_bn (bool): whether use batch norm for each critic layers.
+            force_fullrank (bool): whether force the network function to be
+                of fullrank, if True, achieved by adding a direct link from
+                input to output.
+            fullrank_diag_weight (float): the weight parameter multiplied to
+                the direct input-output link when force_fullrank.
             optimizer (torch.optim.Optimizer): (optional) optimizer for training.
             name (str): name of this CriticAlgorithm.
         """
@@ -155,14 +160,13 @@ class CriticAlgorithm(Algorithm):
 class PinverseAlgorithm(Algorithm):
     r"""PinverseNet Algorithm
         
-    Simple MLP network used with the functional gradient par_vi methods
-    It is used to predict :math:`x=J^{-1}*eps` given eps for the purpose of 
-    optimizing a downstream objective Jx - eps = 0. 
+    Simple MLP network used with the amortized functional gradient vi methods.
+    It is used to predict :math:`x=J^{-1}*eps` given eps or :math:`xJ^{-1}e`
+    for a standard Gaussian noise e if eps is not given.
     
-    If using ``svgd3``, then the eps quantity represents the kernel grad
+    If using ``rkhs``, then the eps quantity represents the kernel grad
         :math:`\nabla_{z'}k(z', z)`
-    if using ``minmax``, the eps quantity represents the critic 
-        input-output jacobian :math:`\frac{\partial \phi}{\partial z}`
+    if using ``minmax``, the eps is not given
     """
 
     def __init__(self,
@@ -180,16 +184,13 @@ class PinverseAlgorithm(Algorithm):
                 input_dim dim of z, and add a direct link of z to the output.
             output_dim (int): total output dimension of the pinverse net, will differ
                 between ``svgd3`` and ``minmax`` methods
+            eps_dim (int): dimension of the kernel_grad term when Pinverse is used
+                for ``rkhs``, None when used for ``minmax``.
             hidden_size (tuple(int,)): base hidden width for pinverse net
             net (Network): network for predicting outputs from inputs.
                 If None, a default ReluMLP with hidden_layers will be created
             optimizer (torch.optim.Optimizer): (optional) optimizer for training.
             name (str): name of this CriticAlgorithm.
-            eps_shape (list or None): shape of eps to estimate. In general ``svgd3``
-                takes an eps input of shape [B', B, k]. ``minmax`` takes an eps
-                of shape [B, k, d]. 
-                if ``eps_shape`` is None, then only :math:'J^{-1}' is estimated, 
-                and eps is not an input to the forward pass
         """
         if optimizer is None:
             optimizer = alf.optimizers.Adam(lr=1e-3)
@@ -295,7 +296,7 @@ class Generator(Algorithm):
                  par_vi=None,
                  functional_gradient=None,
                  force_fullrank=True,
-                 fullrank_diag_weight=0.6,
+                 fullrank_diag_weight=1.,
                  pinverse_solve_iters=1,
                  use_jac_regularization=True,
                  critic_input_dim=None,
@@ -347,6 +348,16 @@ class Generator(Algorithm):
                 * minmax: Fisher Neural Sampler, optimal descent direction of
                     the Stein discrepancy is solved by an inner optimization
                     procedure in the space of L2 neural networks.
+            functional_gradient (string): amortized functional gradient vi
+                methods, options are [``rkhs``, ``minmax``]
+                * rkhs: the function space where gradient is computed is the 
+                    RKHS of Gaussian kernel.
+                * minmax: the function space where gradient is computed is L2.
+            force_fullrank (bool): whether force the generator function to be
+                of fullrank, if True, achieved by adding a direct link from
+                input to output.
+            fullrank_diag_weight (float): the weight parameter multiplied to
+                the direct input-output link when force_fullrank.
             optimizer (torch.optim.Optimizer): (optional) optimizer for training
             name (str): name of this generator
         """
@@ -393,14 +404,9 @@ class Generator(Algorithm):
             if functional_gradient == 'rkhs':
                 self._grad_func = self._rkhs_func_grad
                 if force_fullrank:
-                    # make generator function fullrank
-                    if functional_gradient == 'rkhs':
-                        self._eps_dim = output_dim
-                    elif functional_gradient == 'minmax':
-                        self._eps_dim = output_dim * output_dim
+                    self._eps_dim = output_dim
                     hidden_size = 100
                 else:
-                    # leave generator function non-fullrank
                     self._eps_dim = noise_dim
                     hidden_size = 10
             elif functional_gradient == 'minmax':
@@ -849,21 +855,27 @@ class Generator(Algorithm):
 
         self._pinverse solves an inverse problem for the amortized 
         functional gradient vi methods ``rkhs`` and ``minmax``. 
-        For ``rkhs``, it takes z' and :math:'\nabla_{z'}k(z', z)' as input 
-        and outputs
-        :math:`(\partial f / \partial z')^{-1} * \nabla_{z'}k(z', z)`.
-        The training loss is given by
-        :math:'\|()\partical f / \partial z')^T y - \nabla_{z'}k(z',z)',
-        where y denotes the output of self._pinverse.
-        The first term is computed by vector-jacobian product between the
-        generator f and output y.
-    
+        * rkhs: takes z' and :math:`\nabla_{z'}k(z', z)` as inputs, outputs
+            :math:`(\partial f / \partial z')^{-1} * \nabla_{z'}k(z', z)`.
+            The training loss is given by
+            :math:`\|(\partical f / \partial z')^T y - \nabla_{z'}k(z',z)`,
+            where y denotes the output of self._pinverse and f denotes the 
+            generator function, the first term is computed by vjp of f and y.    
+        * minmax: takes z as inputs, outputs
+            :math:`(\partial f / \partial z)^{-1} * e`.
+            The training loss is given by
+            :math:`\|(\partical f / \partial z)^T y - e`,
+            where y denotes the output of self._pinverse and f denotes the
+            generator function, e is a random gaussian vector which we use
+            the augmented noise of z. The first term is computed by jvp.
+
         Args: 
-            z (torch.tensor): of size [N2, K], representing z'
-            eps (torch.tensor): of size [N2, N, D or K], representing
-                :math:'\nabla_{z'}k(z', z)', last dimension is D when 
-                self._force_fullrank is True, K otherwise. In general,
-                K is much less than D.
+            z (torch.tensor): of size [N2, K] representing z' for ``rkhs``,
+                or size [N, K] representing z for ``minmax``.
+            eps (torch.tensor): only used for ``rkhs``, size [N2, N, D or K] 
+                representing :math:`\nabla_{z'}k(z', z)`, where the last 
+                dimension is D when self._force_fullrank is True, K otherwise. 
+                In general, K is much less than D.
 
         Returns:
             pinverse_loss (float)
@@ -873,7 +885,7 @@ class Generator(Algorithm):
         assert z.shape[-1] == self._noise_dim or z.shape[-1] == self._output_dim
         z_inputs = z[:, :self._noise_dim]
 
-        if self._eps_dim is not None:
+        if self._functional_gradient == 'rkhs':
             assert eps.ndim == 3
             assert z.shape[0] == eps.shape[0]
             assert eps.shape[-1] == self._eps_dim
@@ -895,7 +907,9 @@ class Generator(Algorithm):
             jac_y = jac_y.reshape(z.shape[0], eps.shape[1],
                                   -1)  # [N2, N, D or K]
             loss = torch.nn.functional.mse_loss(jac_y, eps)
-        else:
+
+        elif self._functional_gradient == 'minmax':
+            assert eps is None
             assert z.shape[-1] == self._output_dim
             y = self._pinverse.predict_step(z_inputs).output  # [N2, D]
             jac_y, _ = self._net.compute_vjp(z_inputs, y)  # [N2, K]
@@ -907,6 +921,9 @@ class Generator(Algorithm):
                     dim=-1)
                 jac_y += self._fullrank_diag_weight * y  # [N2, D]
             loss = torch.nn.functional.mse_loss(jac_y, z.detach())
+
+        else:
+            raise ValueError('pinverse only supports ``rkhs`` and ``minmax``')
 
         return loss
 
@@ -977,8 +994,16 @@ class Generator(Algorithm):
         return (loss, pinverse_loss), loss_propagated
 
     def _func_critic_train_step(self, inputs, gen_outputs, loss_func):
-        """
-        Compute the loss for critic training.
+        r"""Compute the following loss for critic training.
+        :math:`\nabla_x neglogp(f(z))\phi(z) + Tr(J_f^{-1}(z)J_{\phi}(z)) - L2(\phi)`
+        where the trace term is estimated by the Hutchinson's estimator. 
+
+        Args:
+            inputs (torch.Tensor): the (augmented) input noise of size [N, D]
+                if force_fullrank or [N, K] if not.
+            gen_outputs (torch.Tensor): outputs of the generator corresponding
+                to the inputs, of size [N, D].
+            loss_func (callable)
         """
         assert inputs.shape[-1] == self._critic._output_dim
 
@@ -994,6 +1019,9 @@ class Generator(Algorithm):
         J_inv_z = self._pinverse.predict_step(critic_inputs)
         critic_outputs, vjp_critic = self._critic.predict_step(
             critic_inputs, J_inv_z)  # [N, D], [N, D]
+
+        # we use the augmented noise (inputs) as the random noise for the
+        # Hutchinson's estimator
         tr_critic_J = torch.einsum('bi,bi->b', vjp_critic, inputs)  # [N]
 
         critic_loss_grad = (loss_grad * critic_outputs).sum(-1)  # [N]
@@ -1019,8 +1047,10 @@ class Generator(Algorithm):
         Args:
             inputs: None
             outputs (tuple of Tensors): (outputs, gen_inputs) of size [N, D] and
-                [N, K] respectively, where N being the sample size, D being the 
+                [N, D or K] respectively, where N being the sample size, D being the 
                 output dim of ReluMLP and K being the input dim of the generator.
+                The last dimension of ``gen_inputs`` being D if force_fullrank, 
+                being K otherwise.
             loss_func (callable)
             entropy_regularization (float): tradeoff parameter
             transform_func (not used)

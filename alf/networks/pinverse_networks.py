@@ -43,8 +43,8 @@ class PinverseNetwork(Network):
                  kernel_initializer=None,
                  name="PinverseNetwork"):
         r"""Creates an instance of `PinverseNetwork` for predicting 
-        :math:`x=J^{-1}*eps` given eps for the purpose of optimizing a 
-        downstream objective :math:`Jx - eps = 0`. 
+        :math:`x=J^{-1}*eps` given eps or :math:`xJ^{-1}e` for a standard
+        Gaussian noise e if eps is not given. 
 
         Args:
             input_tensor_spec: A TensorSpec representing z_spec or a tuple of 
@@ -79,13 +79,13 @@ class PinverseNetwork(Network):
         self._hidden_size = hidden_size
         self._activation = activation
 
-        # if kernel_initializer is None:
-        #     kernel_initializer = functools.partial(
-        #         variance_scaling_init,
-        #         gain=1.0 / 2.0,
-        #         mode='fan_in',
-        #         distribution='truncated_normal',
-        #         nonlinearity=math_ops.identity)
+        if kernel_initializer is None:
+            kernel_initializer = functools.partial(
+                variance_scaling_init,
+                gain=1.0 / 2.0,
+                mode='fan_in',
+                distribution='truncated_normal',
+                nonlinearity=math_ops.identity)
 
         self._z_encoder = torch.nn.Linear(self._z_dim, hidden_size)
         if self._eps_dim is not None:
@@ -109,45 +109,37 @@ class PinverseNetwork(Network):
         Args:
             inputs:  Tensor z (self._eps_dim is None) or tuple of Tensors (z, eps) 
                 (self._eps_dim is not None)
-                z (torch.tensor): size [B', K] or [B', D], represents z' quantity 
+                z (torch.tensor): size [B, K] or [B, D], represents z' quantity 
                     in the ``svgd3`` case, where K is the input dimension to the 
                     generator, which is less or equal to the output dimension D.
-                eps (torch.tensor):  size [B', B, K] or [B', B, D] for ``svgd3``, 
-                    [B, K, D] for ``minmax``. K equals D when the density transform
-                    function is fullrank, e.g., :math:`x = f(z) + z`, otherwise 
-                    K is necessarily less than D.
+                eps (torch.tensor):  size [B, K] or [B, D], only used in ``rkhs``, 
+                    K equals D when the density transform function is fullrank, 
+                    otherwise K is necessarily less than D.
             state: empty for API consistency
 
         Returns:
-            out (torch.Tensor): of size [B2, B, D] for ``svgd3`` method, or
-                [B, K, D] for ``minmax``.
+            out (torch.Tensor): of size [B, D].
             state: empty
         """
         if self._eps_dim is None:
             z = inputs
         else:
             z, eps = inputs
-            assert eps.ndim == 3 and eps.shape[-1] == self._eps_dim, (
+            assert eps.ndim == 2 and eps.shape[-1] == self._eps_dim, (
                 "the input eps has wrong shape!")
             assert z.shape[0] == eps.shape[0], (
                 "batch sizes of input z and eps do not match!")
-        batch_size_z = z.shape[0]
         assert z.ndim == 2 and z.shape[-1] >= self._z_dim, (
             "the input z has wrong shape!")
 
         if z.shape[-1] > self._z_dim:
             z = z[:, :self._z_dim]
-        if self._eps_dim is not None:
-            z = torch.repeat_interleave(z, eps.shape[1], dim=0)
         joint = self._activation(self._z_encoder(z))
 
         if self._z_dim is not None:
-            eps = eps.reshape(batch_size_z * eps.shape[1], -1)
             encoded_eps = self._activation(self._eps_encoder(eps))
             joint = torch.cat([joint, encoded_eps], -1)
 
         out, _ = self._joint_encoder(joint)
-        if self._z_dim is not None:
-            out = out.reshape(batch_size_z, -1, self._output_dim)
 
         return out, state
