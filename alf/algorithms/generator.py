@@ -1068,17 +1068,24 @@ class Generator(Algorithm):
             outputs = self._net(inputs)[0]# + z # [N, k]
             
         elif (self._noise_dim == z_shape) or (not self._square_jac):
-            z = gen_inputs
-            z2 = torch.randn(num_particles, self._noise_dim, requires_grad=True)
-            outputs2 = self._net(z2)[0]  # f(z'), df/dz
+            #z = gen_inputs
+            z = torch.zeros(num_particles, self._noise_dim).normal_(0., .01) # [N, k]
+            z = z.requires_grad_(True)
+            outputs = self._net(z)[0]# + z # [N, k]
+            #z2 = torch.randn(num_particles, self._noise_dim, requires_grad=True)
+            z2 = torch.zeros(num_particles, self._noise_dim).normal_(0., .01)
+            z2 = z2.requires_grad_(True)
+            outputs2, jac2 = self._net(z2, requires_jac=True)[0]  # f(z'), df/dz
             z_pinverse_input = z2
             jac2_fz = None
 
         # [N2, N], [N2, N, D]
         kernel_weight, kernel_grad = self._rbf_func2(z2, z)
         if self._use_pinverse:        
-            kernel_grad, pinverse_loss, reg = self.pinverse_fn(
+            y, pinverse_loss, reg = self.pinverse_fn(
                 z_pinverse_input.detach(), kernel_grad.detach())
+            k_grad = kernel_grad
+            kernel_grad = y
         else:
             jac2_inv = torch.inverse(jac2_fz)
             kernel_grad = torch.einsum('ijk, iaj->iak', jac2_inv, kernel_grad) # [N2, N, D]
@@ -1096,11 +1103,13 @@ class Generator(Algorithm):
                                    loss_grad) / num_particles  # [N, D]
         
         grad = kernel_logp - entropy_regularization * kernel_grad.mean(0)
-        print ('klogp', kernel_logp.norm().item(), 'y', kernel_grad.norm().item())
         loss_svgd = torch.sum(grad.detach() * outputs, dim=1)
         loss_propagated = loss_svgd
+        jac_reg = jac2.norm(keepdim=True).mean()
         if self._use_jac_regularization:
-            loss_propagated = loss_propagated
+            loss_propagated = loss_propagated + jac_reg
+        print ('klogp', kernel_logp.norm().item(), 'y', kernel_grad.norm().item(), 'gradk', k_grad.norm().item(), 'jac', jac_reg.item(),
+                'k: ', kernel_weight.norm().item())
         return (loss, pinverse_loss), loss_propagated
 
     

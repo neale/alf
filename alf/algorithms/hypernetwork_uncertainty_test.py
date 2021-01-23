@@ -78,8 +78,8 @@ class HyperNetworkSampleTest(parameterized.TestCase, alf.test.TestCase):
         gridx, gridy = torch.meshgrid(x, y)
         grid = torch.stack((gridx.reshape(-1), gridy.reshape(-1)), -1)
         
-        noise_d = torch.distributions.Normal(torch.tensor([0]), torch.tensor([1.]))
-        noise = noise_d.icdf(torch.linspace(1e-3, 1-1e-3, 512))
+        noise_d = torch.distributions.Normal(torch.tensor([0]), torch.tensor([.01]))
+        noise = noise_d.icdf(torch.linspace(1e-2, 1-1e-2, 512))
         params = algorithm.sample_parameters(noise=noise, num_particles=512)
         outputs = algorithm.predict_step(grid, params=params).output.cpu()
         #outputs = algorithm.predict_step(grid, num_particles=512).output.cpu()
@@ -143,15 +143,15 @@ class HyperNetworkSampleTest(parameterized.TestCase, alf.test.TestCase):
         
         train_nsamples = 100
         test_nsamples = 200
-        batch_size = train_nsamples // 10
+        batch_size = train_nsamples // 1
         inputs, targets = self.generate_class_data(train_nsamples)
         test_inputs, test_targets = self.generate_class_data(test_nsamples)
         noise_dim = 50
         hidden_size = 50
         pinverse_hidden_size = 92
         pinverse_iters = 1
-        lr = 1e-3
-        weight_decay = 0.
+        lr = 1e-2
+        weight_decay = 0
         algorithm = HyperNetwork(
             input_tensor_spec=input_spec,
             fc_layer_params=((10, True), (10, True)),
@@ -170,6 +170,7 @@ class HyperNetworkSampleTest(parameterized.TestCase, alf.test.TestCase):
             pinverse_use_eps=True,
             pinverse_hidden_size=pinverse_hidden_size,
             square_jac=False,
+            use_jac_regularization=False,
             pinverse_batch_size=num_particles,
             parameterization=parameterization,
             optimizer=alf.optimizers.Adam(lr=lr, weight_decay=weight_decay),
@@ -227,8 +228,8 @@ class HyperNetworkSampleTest(parameterized.TestCase, alf.test.TestCase):
                     tag += '_fvi/'
                 if functional_gradient:
                     tag += '_fg-vi/'
-                sub = '4cls_{}z_2h{}_pnet{}+nohj_40lr_ad{}w{}_{}iter_nsq'.format(
-                    noise_dim, hidden_size, pinverse_hidden_size, lr, weight_decay, pinverse_iters)
+                sub = '4cls_{}z_2h{}_pnet{}_40lr_ad{}w{}_{}iter_nsq_b{}_.01v'.format(
+                    noise_dim, hidden_size, pinverse_hidden_size, lr, weight_decay, pinverse_iters, batch_size)
                 tag += '{}/'.format(sub)
                 self.plot_classification(i, algorithm, tag)
            
