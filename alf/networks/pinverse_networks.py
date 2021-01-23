@@ -136,7 +136,7 @@ class PinverseNetwork(Network):
             z = z[:, :self._z_dim]
         joint = self._activation(self._z_encoder(z))
 
-        if self._z_dim is not None:
+        if self._eps_dim is not None:
             encoded_eps = self._activation(self._eps_encoder(eps))
             joint = torch.cat([joint, encoded_eps], -1)
 
