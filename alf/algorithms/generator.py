@@ -906,7 +906,7 @@ class Generator(Algorithm):
                                  self._output_dim - self._noise_dim)),
                     dim=-1)
                 jac_y += self._fullrank_diag_weight * y  # [N2, D]
-            loss = torch.nn.functional.mse_loss(jac_y, z)
+            loss = torch.nn.functional.mse_loss(jac_y, z.detach())
 
         return loss
 
@@ -948,17 +948,21 @@ class Generator(Algorithm):
                                                       kernel_grad.detach())
             self._pinverse.update_with_gradient(LossInfo(loss=pinverse_loss))
 
-        # construct functional gradient
-        J_inv_kernel_grad = self._pinverse(gen_inputs2.detach(),
-                                           kernel_grad.detach())  # [N2, N, D]
+        # construct functional gradient via pinverse
+        gen_inputs2_batch = torch.repeat_interleave(
+            gen_inputs2, num_particles, dim=0).detach()
+        kernel_grad_batch = kernel_grad.reshape(num_particles * num_particles,
+                                                -1).detach()
+        J_inv_kernel_grad = self._pinverse.predict_step(
+            gen_inputs2_batch, kernel_grad_batch).output  # [N2*N, D]
+        J_inv_kernel_grad = J_inv_kernel_grad.reshape(
+            num_particles, num_particles, -1)  # [N2, N, D]
 
-        loss_inputs = outputs2
-        loss = loss_func(loss_inputs)
+        loss = loss_func(outputs2)
         if isinstance(loss, tuple):
             neglogp = loss.loss
         else:
             neglogp = loss
-
         loss_grad = torch.autograd.grad(neglogp.sum(), outputs2)[0]  # [N2, D]
         kernel_logp = torch.matmul(kernel_weight.t(),
                                    loss_grad) / num_particles  # [N, D]
@@ -972,23 +976,11 @@ class Generator(Algorithm):
 
         return (loss, pinverse_loss), loss_propagated
 
-    def _func_critic_train_step(self, inputs, loss_func):
+    def _func_critic_train_step(self, inputs, gen_outputs, loss_func):
         """
         Compute the loss for critic training.
         """
         assert inputs.shape[-1] == self._critic._output_dim
-        critic_inputs = inputs[:, :self._critic._input_dim]
-        eps = torch.randn(inputs.shape[0], self._output_dim)  # [N, D]
-        vjp_f, gen_outputs = self._net.compute_vjp(critic_inputs,
-                                                   eps)  # [N, D]
-        if self._force_fullrank:
-            gen_outputs += self._fullrank_diag_weight * inputs
-            vjp_f = torch.cat(
-                (vjp_f,
-                 torch.zeros(vjp_f.shape[0],
-                             self._output_dim - self._noise_dim)),
-                dim=-1)
-            vjp_f += self._fullrank_diag_weight * inputs  # [N, D]
 
         loss = loss_func(gen_outputs)
         if isinstance(loss, tuple):
@@ -998,9 +990,11 @@ class Generator(Algorithm):
         loss_grad = torch.autograd.grad(neglogp.sum(),
                                         gen_outputs)[0]  # [N, D]
 
+        critic_inputs = inputs[:, :self._critic._input_dim]
+        J_inv_z = self._pinverse.predict_step(critic_inputs)
         critic_outputs, vjp_critic = self._critic.predict_step(
-            critic_inputs, vjp_f)  # [N, D], [N, D]
-        tr_critic_J = torch.einsum('bi,bi->b', vjp_critic, eps)  # [N]
+            critic_inputs, J_inv_z)  # [N, D], [N, D]
+        tr_critic_J = torch.einsum('bi,bi->b', vjp_critic, inputs)  # [N]
 
         critic_loss_grad = (loss_grad * critic_outputs).sum(-1)  # [N]
 
@@ -1040,7 +1034,9 @@ class Generator(Algorithm):
 
         # train pinverse
         for _ in range(self._pinverse_solve_iters):
-            p_inputs = torch.randn_like(gen_inputs)
+            # p_inputs = torch.randn_like(gen_inputs)
+            p_inputs = outputs.detach().clone()
+            p_inputs.requires_grad = True
             pinverse_loss = self._pinverse_train_step(p_inputs)
             self._pinverse.update_with_gradient(LossInfo(loss=pinverse_loss))
 
@@ -1052,7 +1048,10 @@ class Generator(Algorithm):
             else:
                 z_inputs = gen_inputs.detach().clone()
                 z_inputs.requires_grad = True
-            critic_loss = self._func_critic_train_step(z_inputs, loss_func)
+                f_outputs = outputs.detach().clone()
+                f_outputs.requires_grad = True
+            critic_loss = self._func_critic_train_step(z_inputs, f_outputs,
+                                                       loss_func)
             self._critic.update_with_gradient(LossInfo(loss=critic_loss))
 
         # construct functional gradient
