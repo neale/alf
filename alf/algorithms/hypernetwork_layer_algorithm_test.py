@@ -65,19 +65,19 @@ class HyperNetworkTest(parameterized.TestCase, alf.test.TestCase):
         self.assertGreater(float(torch.min(x - y)), eps)
 
     @parameterized.parameters(
-                              ('gfsf', False, False),  #A-GFSF
-                              ('gfsf', True, False),  #A-GFSF-fv
-                              ('svgd3', False, False), # A-SVGD
-                              ('svgd3', True, False),  #A-SVGD-fv
-                              ('svgd3', False, True), #G-SVGD
-                              ('minmax', False, False), #A-minmax
-                              # ('minmax', True, False),  #A-minmax-fv
-                              ('minmax', False, True),  #G-minmax
+                              #('svgd3', False, None), # A-SVGD
+                              #('svgd3', True, None),  #A-SVGD-fv
+                              #('svgd3', False, 'rkhs'), #G-SVGD
+                              #('gfsf', False, None),  #A-GFSF
+                              #('gfsf', True, None),  #A-GFSF-fv
+                              #('minmax', False, None), #A-minmax
+                              ('minmax', True, None),  #A-minmax-fv
+                              ('minmax', False, 'minmax'),  #G-minmax
     )
     def test_bayesian_linear_regression(self,
                                         par_vi='svgd3',
                                         function_vi=False,
-                                        functional_gradient=False,
+                                        functional_gradient='rkhs',
                                         train_batch_size=10,
                                         num_particles=128):
         """
@@ -128,16 +128,15 @@ class HyperNetworkTest(parameterized.TestCase, alf.test.TestCase):
             functional_gradient=functional_gradient,
             function_vi=function_vi,
             function_bs=train_batch_size,
-            use_pinverse=True,
-            pinverse_type='network',
-            pinverse_resolve=False,
-            pinverse_solve_iters=20,
+            pinverse_solve_iters=1,
             parameterization=parameterization,
             critic_hidden_layers=(hidden_size, hidden_size),
             critic_iter_num=5,
             critic_l2_weight=10.0,
             optimizer=alf.optimizers.Adam(lr=lr),
-            critic_optimizer=alf.optimizers.Adam(lr=lr))
+            critic_optimizer=alf.optimizers.Adam(lr=lr),
+            pinverse_optimizer=alf.optimizers.Adam(lr=1e-4))
+
         print("ground truth mean: {}".format(true_mean))
         print("ground truth cov norm: {}".format(true_cov.norm()))
         print("ground truth cov: {}".format(true_cov))

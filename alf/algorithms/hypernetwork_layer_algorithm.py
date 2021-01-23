@@ -104,15 +104,11 @@ class HyperNetwork(Algorithm):
                  function_extra_bs_sampler='uniform',
                  function_extra_bs_std=1.,
                  functional_gradient=False,
-                 use_pinverse=False,
-                 pinverse_type='network',
-                 pinverse_hidden_size=10,
-                 pinverse_batch_size=None,
-                 pinverse_use_eps=True,
-                 pinverse_resolve=False,
+                 force_fullrank=True,
+                 fullrank_diag_weight=1.0,
                  pinverse_solve_iters=1,
                  use_jac_regularization=False,
-                 square_jac=True,
+                 pinverse_optimizer=None,
                  parameterization='network',
                  loss_type="classification",
                  voting="soft",
@@ -198,7 +194,6 @@ class HyperNetwork(Algorithm):
                     noise_spec,
                     hidden_layers=hidden_layers,
                     output_size=gen_output_dim,
-                    bias=True,
                     name='Generator')
             else:
                 net = EncodingNetwork(
@@ -266,17 +261,13 @@ class HyperNetwork(Algorithm):
             critic_relu_mlp=functional_gradient,
             critic_iter_num=critic_iter_num,
             critic_l2_weight=critic_l2_weight,
-            critic_optimizer=critic_optimizer,
             functional_gradient=functional_gradient,
-            use_pinverse=use_pinverse,
-            pinverse_hidden_size=pinverse_hidden_size,
-            pinverse_type=pinverse_type,
-            pinverse_use_eps=pinverse_use_eps,
-            pinverse_resolve=pinverse_resolve,
+            force_fullrank=force_fullrank,
+            fullrank_diag_weight=fullrank_diag_weight,
             pinverse_solve_iters=pinverse_solve_iters,
-            pinverse_batch_size=pinverse_batch_size,
-            square_jac = square_jac,
             use_jac_regularization=use_jac_regularization,
+            critic_optimizer=critic_optimizer,
+            pinverse_optimizer=pinverse_optimizer,
             optimizer=None,
             name=name)
         
@@ -337,10 +328,12 @@ class HyperNetwork(Algorithm):
             output, _ = self._generator._predict(batch_size=num_particles)
         else:
             output = self._generator.predict_step(
-            noise=noise, batch_size=num_particles, training=training).output
+                noise=noise, batch_size=num_particles,
+                training=training).output
         return output
 
-    def predict_step(self, inputs, params=None, num_particles=None, state=None):
+    def predict_step(self, inputs, params=None, num_particles=None,
+                     state=None):
         """Predict ensemble outputs for inputs using the hypernetwork model.
         
         Args:
@@ -559,15 +552,12 @@ class HyperNetwork(Algorithm):
             params = params[0]
         self._param_net.set_parameters(params)
         with torch.no_grad():
-            outputs = self._predict_dataset(
-                self._test_loader,
-                num_particles)
+            outputs = self._predict_dataset(self._test_loader, num_particles)
         probs = F.softmax(outputs, -1).mean(0)
         entropy = entropy_fn(probs.T.cpu().detach().numpy())
         with torch.no_grad():
-            outputs_outlier = self._predict_dataset(
-                self._outlier_test,
-                num_particles)
+            outputs_outlier = self._predict_dataset(self._outlier_test,
+                                                    num_particles)
         probs_outlier = F.softmax(outputs_outlier, -1).mean(0)
         entropy_outlier = entropy_fn(probs_outlier.T.cpu().detach().numpy())
         auroc_entropy = self._auc_score(entropy, entropy_outlier)
@@ -678,4 +668,3 @@ class HyperNetwork(Algorithm):
             alf.summary.scalar(name='train_epoch/neglogprob', data=cum_loss)
         if avg_acc is not None:
             alf.summary.scalar(name='train_epoch/avg_acc', data=avg_acc)
-
