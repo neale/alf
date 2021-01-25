@@ -1086,7 +1086,8 @@ class Generator(Algorithm):
 
         # construct functional gradient
         loss = loss_func(outputs.detach())
-        critic_outputs = self._critic.predict_step(outputs.detach()).output
+        critic_outputs = self._critic.predict_step(
+            gen_inputs[:, :self.noise_dim].detach()).output
         loss_propagated = torch.sum(-critic_outputs.detach() * outputs, dim=-1)
 
         return loss, loss_propagated
