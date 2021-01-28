@@ -297,6 +297,7 @@ class Generator(Algorithm):
                  force_fullrank=True,
                  fullrank_diag_weight=1.0,
                  pinverse_solve_iters=1,
+                 pinverse_hidden_size=100,
                  use_jac_regularization=True,
                  critic_input_dim=None,
                  critic_hidden_layers=(100, 100),
@@ -393,14 +394,9 @@ class Generator(Algorithm):
             if functional_gradient == 'rkhs':
                 self._grad_func = self._rkhs_func_grad
                 if force_fullrank:
-                    # make generator function fullrank
-                    if functional_gradient == 'rkhs':
-                        self._eps_dim = output_dim
-                    elif functional_gradient == 'minmax':
-                        self._eps_dim = output_dim * output_dim
-                    hidden_size = 100
+                    self._eps_dim = output_dim
+                    hidden_size = 544
                 else:
-                    # leave generator function non-fullrank
                     self._eps_dim = noise_dim
                     hidden_size = 10
             elif functional_gradient == 'minmax':
@@ -408,6 +404,7 @@ class Generator(Algorithm):
                     "force fullrank when using minmax functional gradient!")
                 self._grad_func = self._minmax_func_grad
                 self._eps_dim = None
+                critic_hidden_size = 100
                 hidden_size = 100
                 self._critic_iter_num = critic_iter_num
                 self._critic_l2_weight = critic_l2_weight
@@ -417,7 +414,7 @@ class Generator(Algorithm):
                 self._critic = CriticAlgorithm(
                     TensorSpec(shape=(noise_dim, )),
                     output_dim=output_dim,
-                    hidden_layers=(hidden_size, hidden_size),
+                    hidden_layers=(critic_hidden_size, critic_hidden_size),
                     use_relu_mlp=True,
                     use_bn=critic_use_bn,
                     force_fullrank=force_fullrank,
@@ -442,7 +439,7 @@ class Generator(Algorithm):
                 noise_dim,
                 output_dim,
                 eps_dim=self._eps_dim,
-                hidden_size=hidden_size,
+                hidden_size=pinverse_hidden_size,
                 optimizer=pinverse_optimizer)
 
         self._kernel_width_averager = AdaptiveAverager(
@@ -493,7 +490,7 @@ class Generator(Algorithm):
                  batch_size=None,
                  training=True,
                  use_jac_regularization=None):
-
+        
         if inputs is None:
             assert self._input_tensor_spec is None
             if noise is None:
@@ -647,7 +644,8 @@ class Generator(Algorithm):
             assert dist.ndim == 1, "dist must have dimension 1 or 2."
         width, _ = torch.median(dist, dim=0)
         width = width / np.log(len(dist))
-        self._kernel_width_averager.update(width)
+        #self._kernel_width_averager.update(width)
+        return width
 
         return self._kernel_width_averager.get()
 
@@ -894,7 +892,9 @@ class Generator(Algorithm):
             jac_y = jac_y.reshape(z.shape[0], eps.shape[1],
                                   -1)  # [N2, N, D or K]
             loss = torch.nn.functional.mse_loss(jac_y, eps)
+
         elif self._functional_gradient == 'minmax':
+            assert eps is None
             assert z.shape[-1] == self._output_dim
             y = self._pinverse.predict_step(z_inputs).output  # [N2, D]
             jac_y, _ = self._net.compute_vjp(z_inputs, y)  # [N2, K]
@@ -907,7 +907,8 @@ class Generator(Algorithm):
                 jac_y += self._fullrank_diag_weight * y  # [N2, D]
             loss = torch.nn.functional.mse_loss(jac_y, z.detach())
         else:
-            raise NotImplementedError # should not reach this
+            raise ValueError('pinverse only supports ``rkhs`` and ``minmax``')
+
         return loss
 
     def _rkhs_func_grad(self,
@@ -938,6 +939,8 @@ class Generator(Algorithm):
         num_particles = outputs.shape[0]
         outputs2, gen_inputs2 = self._predict(
             batch_size=num_particles)  # [N2, D]
+        if self._use_jac_regularization:
+            outputs2, _ = outputs2
 
         # [N2, N], [N2, N, D]
         kernel_weight, kernel_grad = self._rbf_func2(gen_inputs2, gen_inputs)
@@ -971,9 +974,9 @@ class Generator(Algorithm):
         loss_propagated = torch.sum(grad.detach() * outputs, dim=1)
 
         if self._use_jac_regularization:
-            jac_reg = .1 * jac.norm(keepdim=True).mean()
+            jac_reg = .001 * jac.norm(keepdim=True).mean()
             loss_propagated -= jac_reg
-
+        print ('K:', kernel_weight.norm().item())
         return (loss, pinverse_loss), loss_propagated
 
     def _func_critic_train_step(self, inputs, gen_outputs, loss_func):
@@ -981,7 +984,6 @@ class Generator(Algorithm):
         Compute the loss for critic training.
         """
         assert inputs.shape[-1] == self._critic._output_dim
-
         loss = loss_func(gen_outputs)
         if isinstance(loss, tuple):
             neglogp = loss.loss
@@ -989,11 +991,10 @@ class Generator(Algorithm):
             neglogp = loss
         loss_grad = torch.autograd.grad(neglogp.sum(),
                                         gen_outputs)[0]  # [N, D]
-
         critic_inputs = inputs[:, :self._critic._input_dim]
-        J_inv_z = self._pinverse.predict_step(critic_inputs)
+        J_inv_z = self._pinverse.predict_step(critic_inputs).output
         critic_outputs, vjp_critic = self._critic.predict_step(
-            critic_inputs, J_inv_z)  # [N, D], [N, D]
+            inputs, J_inv_z).output  # [N, D], [N, D]
         tr_critic_J = torch.einsum('bi,bi->b', vjp_critic, inputs)  # [N]
 
         critic_loss_grad = (loss_grad * critic_outputs).sum(-1)  # [N]
@@ -1056,10 +1057,11 @@ class Generator(Algorithm):
 
         # construct functional gradient
         loss = loss_func(outputs.detach())
-        critic_outputs = self._critic.predict_step(outputs.detach()).output
+        critic_outputs = self._critic.predict_step(
+            gen_inputs[:, :self._noise_dim].detach()).output
         loss_propagated = torch.sum(-critic_outputs.detach() * outputs, dim=-1)
 
-        return loss, loss_propagated
+        return (loss, pinverse_loss), loss_propagated
 
     def _gfsf_grad(self,
                    inputs,

@@ -54,8 +54,11 @@ class FuncParVIAlgorithmTest(parameterized.TestCase, alf.test.TestCase):
         self.assertEqual(x.shape, y.shape)
         self.assertGreater(float(torch.min(x - y)), eps)
 
-    @parameterized.parameters(('gfsf'), ('svgd'), ('gfsf', True),
-                              ('svgd', True))
+    @parameterized.parameters(#('gfsf', False),
+                              ('svgd', False),
+                              #('gfsf', True),
+                              #('svgd', True)
+    )
     def test_functional_par_vi_algorithm(self,
                                          par_vi='svgd',
                                          function_vi=False,
@@ -84,7 +87,6 @@ class FuncParVIAlgorithmTest(parameterized.TestCase, alf.test.TestCase):
         true_cov = torch.inverse(
             inputs.t() @ inputs)  # + torch.eye(input_size))
         true_mean = true_cov @ inputs.t() @ targets
-        noise_dim = 3
         algorithm = FuncParVIAlgorithm(
             input_tensor_spec=input_spec,
             last_layer_param=(output_dim, False),
@@ -138,7 +140,7 @@ class FuncParVIAlgorithmTest(parameterized.TestCase, alf.test.TestCase):
             print("train_iter {}: cov err {}".format(i, cov_err))
             print("computed_cov norm: {}".format(computed_cov.norm()))
 
-        train_iter = 5000
+        train_iter = 10000
         for i in range(train_iter):
             _train()
             if i % 1000 == 0:

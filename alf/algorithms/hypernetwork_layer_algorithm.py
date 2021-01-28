@@ -43,7 +43,12 @@ def classification_loss(output, target):
     pred = output.max(-1)[1]
     acc = pred.eq(target).float().mean(0)
     avg_acc = acc.mean()
-    loss = F.cross_entropy(output.transpose(1, 2), target)
+    if output.ndim == 2:  # function_vi
+        target = target.reshape(-1)
+        output = output.reshape(target.shape[0], -1)
+    else:
+        output = output.transpose(1, 2)
+    loss = F.cross_entropy(output, target)
     return HyperNetworkLossInfo(loss=loss, extra=avg_acc)
 
 
@@ -103,10 +108,11 @@ class HyperNetwork(Algorithm):
                  function_extra_bs_ratio=0.1,
                  function_extra_bs_sampler='uniform',
                  function_extra_bs_std=1.,
-                 functional_gradient=False,
+                 functional_gradient=None,
                  force_fullrank=True,
                  fullrank_diag_weight=1.0,
                  pinverse_solve_iters=1,
+                 pinverse_hidden_size=100,
                  use_jac_regularization=False,
                  pinverse_optimizer=None,
                  parameterization='network',
@@ -265,6 +271,7 @@ class HyperNetwork(Algorithm):
             force_fullrank=force_fullrank,
             fullrank_diag_weight=fullrank_diag_weight,
             pinverse_solve_iters=pinverse_solve_iters,
+            pinverse_hidden_size=pinverse_hidden_size,
             use_jac_regularization=use_jac_regularization,
             critic_optimizer=critic_optimizer,
             pinverse_optimizer=pinverse_optimizer,
@@ -347,11 +354,13 @@ class HyperNetwork(Algorithm):
             AlgorithmStep: outputs with shape (batch_size, output_dim)
         """
         if params is None:
-            params = self.sample_parameters(num_particles=num_particles)
-        if self._functional_gradient:
-            params = params[0]
+            params = self.sample_parameters(num_particles=num_particles)      
+            if self._functional_gradient is not None:
+                if self._generator._use_jac_regularization:
+                    params, _ = params
         self._param_net.set_parameters(params)
         outputs, _ = self._param_net(inputs)
+        print (outputs.shape)
         return AlgStep(output=outputs, state=(), info=())
      
     def train_iter(self, num_particles=None, state=None):
@@ -514,8 +523,8 @@ class HyperNetwork(Algorithm):
         if self._use_fc_bn:
             self._generator.eval()
         params = self.sample_parameters(num_particles=num_particles)
-        if self._functional_gradient:
-            params, _ = params
+        #if self._functional_gradient:
+        #    params, _ = params
         self._param_net.set_parameters(params)
         if self._use_fc_bn:
             self._generator.train()
@@ -546,8 +555,8 @@ class HyperNetwork(Algorithm):
         if num_particles is None:
             num_particles = 100
         params = self.sample_parameters(num_particles=num_particles)
-        if self._functional_gradient:
-            params, _ = params
+       # if self._functional_gradient:
+       #     params, _ = params
         if self._generator._par_vi == 'minmax':
             params = params[0]
         self._param_net.set_parameters(params)

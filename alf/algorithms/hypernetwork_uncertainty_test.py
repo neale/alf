@@ -70,27 +70,43 @@ class HyperNetworkSampleTest(parameterized.TestCase, alf.test.TestCase):
         
         return data, labels.long()
     
-    def plot_classification(self, i, algorithm, tag=''):
+    def plot_classification(self, i, algorithm, n_classes, tag=''):
         basedir = 'plots/{}'.format(tag)
         os.makedirs(basedir, exist_ok=True)
         x = torch.linspace(-12, 12, 100)
         y = torch.linspace(-12, 12, 100)
         gridx, gridy = torch.meshgrid(x, y)
         grid = torch.stack((gridx.reshape(-1), gridy.reshape(-1)), -1)
-        
-        noise_d = torch.distributions.Normal(torch.tensor([0]), torch.tensor([.01]))
-        noise = noise_d.icdf(torch.linspace(1e-2, 1-1e-2, 512))
-        params = algorithm.sample_parameters(noise=noise, num_particles=512)
-        outputs = algorithm.predict_step(grid, params=params).output.cpu()
-        #outputs = algorithm.predict_step(grid, num_particles=512).output.cpu()
+        """
+        if (i >= 70000) and (i <= 80000):
+            print ('saving')
+            noise_d = torch.distributions.Normal(torch.tensor([0]), torch.tensor([.01]))
+            noise = noise_d.icdf(torch.linspace(1e-4, 1-1e-4, 512))
+            params = algorithm.sample_parameters(noise=noise, num_particles=512)
+            if isinstance(params, tuple):
+                params, _ = params
+            outputs = algorithm.predict_step(grid, params=params).output.cpu()
+            torch.save(outputs, 'outputs_icdf_{}.pt'.format(i))
+            outputs = algorithm.predict_step(grid, num_particles=100).output.cpu()
+            torch.save(outputs, 'outputs100_{}.pt'.format(i))
+            outputs = algorithm.predict_step(grid, num_particles=512).output.cpu()
+            torch.save(outputs, 'outputs512_{}.pt'.format(i))
+            outputs = []
+            for _ in range(10):
+                outputs.append(algorithm.predict_step(grid, num_particles=100).output.cpu())
+            outputs = torch.cat(outputs, dim=1)
+            torch.save(outputs, 'outputs_10x100_{}.pt'.format(i))
+        else:
+            outputs = algorithm.predict_step(grid, num_particles=100).output.cpu()
+        """
+        outputs = algorithm.predict_step(grid, num_particles=100).output.cpu()
         outputs = F.softmax(outputs, -1).detach()  # [B, D]
         mean_outputs = outputs.mean(1).cpu()  # [B, D]
         std_outputs = outputs.std(1).cpu()
         conf_mean = mean_outputs.mean(-1)
         conf_std = std_outputs.max(-1)[0] * 1.94
         labels = mean_outputs.argmax(-1)
-        data, _ = self.generate_class_data(n_samples=400) 
-        
+        data, _ = self.generate_class_data(n_classes=n_classes, n_samples=400) 
         p1 = plt.scatter(grid[:, 0].cpu(), grid[:, 1].cpu(), c=conf_std,
             cmap='rainbow')
         p2 = plt.scatter(data[:, 0].cpu(), data[:, 1].cpu(), c='black', alpha=0.1)
@@ -109,19 +125,19 @@ class HyperNetworkSampleTest(parameterized.TestCase, alf.test.TestCase):
         plt.close('all')
 
     @parameterized.parameters(
-        #('svgd3', False, False),
-        #('svgd3', True, False),
-        ('svgd3', False, True),
-        #('gfsf', False, False),
-        #('gfsf', True, False),
-        #('minmax', False, False),
-        #('minmax', True, False),
-        #('minmax', True, False),
+        #('svgd3', False, None),
+        #('svgd3', True, None),
+        ('svgd3', False, 'rkhs'),
+        #('gfsf', False, None),
+        #('gfsf', True, None),
+        #('minmax', False, None),
+        #('minmax', True, None),
+        #('minmax', False, 'minmax'),
     )
     def test_classification_hypernetwork(self,
                                          par_vi='minmax',
                                          function_vi=False,
-                                         functional_gradient=False,
+                                         functional_gradient='rkhs',
                                          n_classes=4,
                                          num_particles=100):
         """
@@ -136,7 +152,7 @@ class HyperNetworkSampleTest(parameterized.TestCase, alf.test.TestCase):
         print ("Function_vi : {}, Functional Gradient".format(
             function_vi, functional_gradient))
         input_size = 2
-        output_dim = 4
+        output_dim = n_classes
         input_spec = TensorSpec((input_size, ), torch.float64)
         train_batch_size = 100
         parameterization = 'network'
@@ -144,13 +160,17 @@ class HyperNetworkSampleTest(parameterized.TestCase, alf.test.TestCase):
         train_nsamples = 100
         test_nsamples = 200
         batch_size = train_nsamples // 1
-        inputs, targets = self.generate_class_data(train_nsamples)
-        test_inputs, test_targets = self.generate_class_data(test_nsamples)
-        noise_dim = 50
-        hidden_size = 50
-        pinverse_hidden_size = 92
+        inputs, targets = self.generate_class_data(train_nsamples, n_classes)
+        test_inputs, test_targets = self.generate_class_data(test_nsamples, n_classes)
+        if n_classes == 4:
+            param_dim = 184
+        else:
+            param_dim = 162
+        noise_dim = 24
+        hidden_size = 24
         pinverse_iters = 1
-        lr = 1e-2
+        pinverse_hidden_size = 10
+        lr = 5e-3
         weight_decay = 0
         algorithm = HyperNetwork(
             input_tensor_spec=input_spec,
@@ -158,24 +178,25 @@ class HyperNetworkSampleTest(parameterized.TestCase, alf.test.TestCase):
             last_layer_param=(output_dim, True),
             last_activation=math_ops.identity,
             noise_dim=noise_dim,
-            hidden_layers=(hidden_size, hidden_size),
+            hidden_layers=(hidden_size,),# hidden_size),
             num_particles=num_particles,
             loss_type='classification',
             par_vi=par_vi,
             function_vi=function_vi,
             function_bs=train_batch_size,
             functional_gradient=functional_gradient,
-            use_pinverse=True,
             pinverse_solve_iters=pinverse_iters,
-            pinverse_use_eps=True,
             pinverse_hidden_size=pinverse_hidden_size,
-            square_jac=False,
+            fullrank_diag_weight=1.0,
+            force_fullrank=True,
             use_jac_regularization=False,
-            pinverse_batch_size=num_particles,
             parameterization=parameterization,
-            optimizer=alf.optimizers.Adam(lr=lr, weight_decay=weight_decay),
             critic_hidden_layers=(hidden_size, hidden_size),
-            critic_optimizer=alf.optimizers.Adam(lr=lr))
+            critic_iter_num=20,
+            critic_l2_weight=10.,
+            optimizer=alf.optimizers.Adam(lr=lr, weight_decay=weight_decay),
+            critic_optimizer=alf.optimizers.Adam(lr=lr),
+            pinverse_optimizer=alf.optimizers.Adam(lr=1e-4))
         
         def _train(i, entropy_regularization=None):
             perm = torch.randperm(train_nsamples)
@@ -200,7 +221,7 @@ class HyperNetworkSampleTest(parameterized.TestCase, alf.test.TestCase):
         def _test(i):
             outputs, _ = algorithm._param_net(test_inputs)
 
-            params = algorithm.sample_parameters(num_particles=200)
+            params = algorithm.sample_parameters(num_particles=100)
             if functional_gradient:
                 params = params[0]
             _params = params.detach().cpu().numpy()
@@ -228,10 +249,12 @@ class HyperNetworkSampleTest(parameterized.TestCase, alf.test.TestCase):
                     tag += '_fvi/'
                 if functional_gradient:
                     tag += '_fg-vi/'
-                sub = '4cls_{}z_2h{}_pnet{}_40lr_ad{}w{}_{}iter_nsq_b{}_.01v'.format(
-                    noise_dim, hidden_size, pinverse_hidden_size, lr, weight_decay, pinverse_iters, batch_size)
+                else:
+                    tag += '/'
+                sub = '{}cls_{}z_1h{}_40lr_ad{}w{}_{}iter_{}h_lbn'.format(
+                    n_classes, noise_dim, hidden_size, lr, weight_decay, pinverse_iters, pinverse_hidden_size)
                 tag += '{}/'.format(sub)
-                self.plot_classification(i, algorithm, tag)
+                self.plot_classification(i, algorithm, n_classes, tag)
            
         train_iter = 500000
         for i in range(train_iter):
@@ -260,7 +283,7 @@ class HyperNetworkSampleTest(parameterized.TestCase, alf.test.TestCase):
         gt_x = torch.linspace(-6, 6, 500).view(-1, 1).cpu()
         gt_y = -(1+gt_x) * torch.sin(1.2*gt_x) 
         (x_train, y_train), (x_test, y_test) = data
-        outputs = algorithm.predict_step(x_test, num_particles=256).output.cpu()
+        outputs = algorithm.predict_step(x_test, num_particles=100).output.cpu()
         mean = outputs.mean(1).squeeze()
         std = outputs.std(1).squeeze()
         x_test = x_test.cpu().numpy()
@@ -303,7 +326,7 @@ class HyperNetworkSampleTest(parameterized.TestCase, alf.test.TestCase):
             last_layer_param=(output_dim, True),
             last_activation=math_ops.identity,
             noise_dim=noise_dim,
-            hidden_layers=(151,),
+            hidden_layers=(noise_dim,),
             loss_type='regression',
             par_vi='svgd3',
             functional_gradient=functional_gradient,

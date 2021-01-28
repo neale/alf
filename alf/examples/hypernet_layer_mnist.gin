@@ -10,33 +10,34 @@ CONV_LAYER_PARAMS = ((6, 5, 1, 2, 2), (16, 5, 1, 0, 2), (120, 5, 1))
 # CONV_LAYER_PARAMS = ((6, 5, 1, 2, 4), (16, 5, 1, 0))
 FC_LAYER_PARAMS = ((84, True), )
 # FC_LAYER_PARAMS = ((144, True), )
-HIDDEN_LAYERS = (128,512)
+HIDDEN_LAYERS = (128,256)
 
-hypernet/Adam.lr=5e-3
+hypernet/Adam.lr=1e-4
 hypernet/Adam.weight_decay=1e-4
 hypernet_critic/Adam.lr=1e-4
 hypernet_critic/Adam.weight_decay=1e-4
+hypernet_pinverse/Adam.lr=1e-4
 
 # algorithm config
 HyperNetwork.conv_layer_params = %CONV_LAYER_PARAMS
 HyperNetwork.fc_layer_params=%FC_LAYER_PARAMS
 HyperNetwork.hidden_layers=%HIDDEN_LAYERS
 HyperNetwork.num_particles=10
-HyperNetwork.noise_dim=64
+HyperNetwork.noise_dim=128
 
 HyperNetwork.parameterization = 'network'
 HyperNetwork.par_vi = 'svgd3'
 HyperNetwork.loss_type = 'classification'
 HyperNetwork.function_vi = False
-HyperNetwork.functional_gradient = True
-HyperNetwork.use_pinverse = True
+HyperNetwork.functional_gradient = 'rkhs'
+HyperNetwork.force_fullrank=False
 HyperNetwork.use_jac_regularization = False
-HyperNetwork.square_jac = False
-HyperNetwork.pinverse_resolve = False
-HyperNetwork.pinverse_use_eps = True
 HyperNetwork.pinverse_solve_iters = 1
+HyperNetwork.pinverse_hidden_size = 512
+HyperNetwork.entropy_regularization = 0.00001
 HyperNetwork.function_bs = 50
 HyperNetwork.optimizer=@hypernet/Adam()
+HyperNetwork.pinverse_optimizer=@hypernet_pinverse/Adam()
 HyperNetwork.critic_optimizer=@hypernet_critic/Adam()
 HyperNetwork.critic_hidden_layers=(100,100)
 HyperNetwork.logging_training=True

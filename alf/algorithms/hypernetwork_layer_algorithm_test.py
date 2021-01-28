@@ -67,19 +67,19 @@ class HyperNetworkTest(parameterized.TestCase, alf.test.TestCase):
     @parameterized.parameters(
                               #('svgd3', False, None), # A-SVGD
                               #('svgd3', True, None),  #A-SVGD-fv
-                              #('svgd3', False, 'rkhs'), #G-SVGD
+                              ('svgd3', False, 'rkhs'), #G-SVGD
                               #('gfsf', False, None),  #A-GFSF
                               #('gfsf', True, None),  #A-GFSF-fv
                               #('minmax', False, None), #A-minmax
-                              ('minmax', True, None),  #A-minmax-fv
-                              ('minmax', False, 'minmax'),  #G-minmax
+                              #('minmax', True, None),  #A-minmax-fv
+                              #('minmax', False, 'minmax'),  #G-minmax
     )
     def test_bayesian_linear_regression(self,
                                         par_vi='svgd3',
                                         function_vi=False,
                                         functional_gradient='rkhs',
                                         train_batch_size=10,
-                                        num_particles=128):
+                                        num_particles=100):
         """
         The hypernetwork is trained to generate the parameter vector for a linear
         regressor. The target linear regressor is :math:`y = X\beta + e`, where 
@@ -129,10 +129,12 @@ class HyperNetworkTest(parameterized.TestCase, alf.test.TestCase):
             function_vi=function_vi,
             function_bs=train_batch_size,
             pinverse_solve_iters=1,
+            pinverse_hidden_size=6,
+            fullrank_diag_weight=1.0,
             parameterization=parameterization,
             critic_hidden_layers=(hidden_size, hidden_size),
-            critic_iter_num=5,
-            critic_l2_weight=10.0,
+            critic_iter_num=3,
+            critic_l2_weight=10.,
             optimizer=alf.optimizers.Adam(lr=lr),
             critic_optimizer=alf.optimizers.Adam(lr=lr),
             pinverse_optimizer=alf.optimizers.Adam(lr=1e-4))
@@ -193,7 +195,7 @@ class HyperNetworkTest(parameterized.TestCase, alf.test.TestCase):
             print("\tcov err {}".format(cov_err))
 
             if sampled_predictive:
-                params = algorithm.sample_parameters(num_particles=200)
+                params = algorithm.sample_parameters(num_particles=100)
                 pred_step = algorithm.predict_step(inputs, params=params)
                 if functional_gradient:
                     params = params[0]
@@ -214,7 +216,7 @@ class HyperNetworkTest(parameterized.TestCase, alf.test.TestCase):
                 scov_err = scov_err / torch.norm(true_cov)
                 print("train_iter {}: sampled cov err {}".format(i, scov_err))
 
-        train_iter = 5000
+        train_iter = 10000
         for i in range(train_iter):
             _train(i)
             if i % 1000 == 0:

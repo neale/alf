@@ -79,13 +79,13 @@ class PinverseNetwork(Network):
         self._hidden_size = hidden_size
         self._activation = activation
 
-        # if kernel_initializer is None:
-        #     kernel_initializer = functools.partial(
-        #         variance_scaling_init,
-        #         gain=1.0 / 2.0,
-        #         mode='fan_in',
-        #         distribution='truncated_normal',
-        #         nonlinearity=math_ops.identity)
+        if kernel_initializer is None:
+            kernel_initializer = functools.partial(
+                variance_scaling_init,
+                gain=1.0 / 2.0,
+                mode='fan_in',
+                distribution='truncated_normal',
+                nonlinearity=math_ops.identity)
 
         self._z_encoder = torch.nn.Linear(self._z_dim, hidden_size)
         if self._eps_dim is not None:
@@ -94,13 +94,17 @@ class PinverseNetwork(Network):
         else:
             joint_hidden_size = hidden_size
         if joint_fc_layer_params is None:
-            joint_fc_layer_params = (joint_hidden_size, joint_hidden_size)
+            joint_fc_layer_params = (joint_hidden_size, joint_hidden_size,
+                                     joint_hidden_size,# joint_hidden_size,
+            )
         self._joint_encoder = EncodingNetwork(
             TensorSpec(shape=(joint_hidden_size, )),
             fc_layer_params=joint_fc_layer_params,
             activation=activation,
             kernel_initializer=kernel_initializer,
             last_layer_size=output_dim,
+            #use_fc_bn=True,
+            last_use_fc_bn=True,
             last_activation=math_ops.identity)
 
     def forward(self, inputs, state=()):
@@ -131,7 +135,6 @@ class PinverseNetwork(Network):
                 "the input eps has wrong shape!")
             assert z.shape[0] == eps.shape[0], (
                 "batch sizes of input z and eps do not match!")
-        batch_size_z = z.shape[0]
         assert z.ndim == 2 and z.shape[-1] >= self._z_dim, (
             "the input z has wrong shape!")
 
@@ -139,12 +142,10 @@ class PinverseNetwork(Network):
             z = z[:, :self._z_dim]
         joint = self._activation(self._z_encoder(z))
 
-        if self._z_dim is not None:
+        if self._eps_dim is not None:
             encoded_eps = self._activation(self._eps_encoder(eps))
             joint = torch.cat([joint, encoded_eps], -1)
 
         out, _ = self._joint_encoder(joint)
-        if self._z_dim is not None:
-            out = out.reshape(batch_size_z, self._output_dim)
 
         return out, state
