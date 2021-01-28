@@ -976,7 +976,6 @@ class Generator(Algorithm):
         if self._use_jac_regularization:
             jac_reg = .001 * jac.norm(keepdim=True).mean()
             loss_propagated -= jac_reg
-        print ('K:', kernel_weight.norm().item())
         return (loss, pinverse_loss), loss_propagated
 
     def _func_critic_train_step(self, inputs, gen_outputs, loss_func):

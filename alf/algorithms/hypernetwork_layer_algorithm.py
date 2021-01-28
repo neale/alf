@@ -309,7 +309,8 @@ class HyperNetwork(Algorithm):
         """
         self._train_loader = train_loader
         self._test_loader = test_loader
-        self._entropy_regularization = 1/ len(train_loader)
+        if self._entropy_regularization is None:
+            self._entropy_regularization = 1/ len(train_loader)
         if outlier is not None:
             assert isinstance(outlier, tuple), "outlier dataset must be " \
                 "provided in the format (outlier_train, outlier_test)"
@@ -571,6 +572,10 @@ class HyperNetwork(Algorithm):
         entropy_outlier = entropy_fn(probs_outlier.T.cpu().detach().numpy())
         auroc_entropy = self._auc_score(entropy, entropy_outlier)
         logging.info("AUROC score: {}".format(auroc_entropy))
+
+        if auroc_entropy >= 0.98:
+            torch.save(outputs_outlier, 'probs_outlier_{}.pt'.format(auroc_entropy))
+            torch.save(outputs, 'probs_inlier_{}.pt'.format(auroc_entropy))
 
     def _classification_vote(self, output, target):
         """ensmeble the ooutputs from sampled classifiers."""
