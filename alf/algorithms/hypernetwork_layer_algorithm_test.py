@@ -72,7 +72,7 @@ class HyperNetworkTest(parameterized.TestCase, alf.test.TestCase):
                               #('gfsf', True, None),  #A-GFSF-fv
                               #('minmax', False, None), #A-minmax
                               #('minmax', True, None),  #A-minmax-fv
-                              #('minmax', False, 'minmax'),  #G-minmax
+                              #('minmax', False, 'minmax', 100),  #G-minmax
     )
     def test_bayesian_linear_regression(self,
                                         par_vi='svgd3',
@@ -129,12 +129,12 @@ class HyperNetworkTest(parameterized.TestCase, alf.test.TestCase):
             function_vi=function_vi,
             function_bs=train_batch_size,
             pinverse_solve_iters=1,
-            pinverse_hidden_size=6,
-            fullrank_diag_weight=1.0,
+            pinverse_hidden_size=100,
+            fullrank_diag_weight=1,
             parameterization=parameterization,
             critic_hidden_layers=(hidden_size, hidden_size),
-            critic_iter_num=3,
-            critic_l2_weight=10.,
+            critic_iter_num=5,
+            critic_l2_weight=10,
             optimizer=alf.optimizers.Adam(lr=lr),
             critic_optimizer=alf.optimizers.Adam(lr=lr),
             pinverse_optimizer=alf.optimizers.Adam(lr=1e-4))
@@ -216,7 +216,7 @@ class HyperNetworkTest(parameterized.TestCase, alf.test.TestCase):
                 scov_err = scov_err / torch.norm(true_cov)
                 print("train_iter {}: sampled cov err {}".format(i, scov_err))
 
-        train_iter = 10000
+        train_iter = 50000
         for i in range(train_iter):
             _train(i)
             if i % 1000 == 0:

@@ -38,14 +38,17 @@ FuncParVILossInfo = namedtuple("FuncParVILossInfo", ["loss", "extra"])
 
 
 def classification_loss(output, target):
+    if output.ndim == 2:
+        output = output.reshape(output.shape[0], target.shape[1], -1)
     pred = output.max(-1)[1]
+    target = target.squeeze(-1)
     acc = pred.eq(target).float().mean(0)
     avg_acc = acc.mean()
     if output.dim == 3:
         output = output.transpose(1, 2)
     else:
+        output = output.reshape(output.shape[0]*target.shape[1], -1)
         target = target.reshape(-1)
-        output = output.reshape(target.shape[0], -1)
     loss = F.cross_entropy(output, target)
     return FuncParVILossInfo(loss=loss, extra=avg_acc)
 
@@ -117,6 +120,11 @@ class FuncParVIAlgorithm(ParVIAlgorithm):
                  function_extra_bs_sampler='uniform',
                  function_extra_bs_std=1.,
                  optimizer=None,
+                 critic_iter_num=2,
+                 critic_l2_weight=10,
+                 critic_hidden_layers=(100,100),
+                 critic_use_bn=True,
+                 critic_optimizer=None,
                  logging_network=False,
                  logging_training=False,
                  logging_evaluate=False,
@@ -208,6 +216,10 @@ class FuncParVIAlgorithm(ParVIAlgorithm):
             logging.info("Each network")
             logging.info("-" * 68)
             logging.info(param_net)
+        
+        critic_input_dim = particle_dim
+        if function_vi:
+            critic_input_dim = function_bs * param_net._output_spec.shape[0]
 
         super().__init__(
             particle_dim,
@@ -216,6 +228,12 @@ class FuncParVIAlgorithm(ParVIAlgorithm):
             entropy_regularization=entropy_regularization,
             par_vi=par_vi,
             optimizer=optimizer,
+            critic_input_dim=critic_input_dim,
+            critic_iter_num=critic_iter_num,
+            critic_l2_weight=critic_l2_weight,
+            critic_hidden_layers=critic_hidden_layers,
+            critic_use_bn=critic_use_bn,
+            critic_optimizer=critic_optimizer,
             debug_summaries=debug_summaries,
             name=name)
 
@@ -259,7 +277,8 @@ class FuncParVIAlgorithm(ParVIAlgorithm):
         """
         self._train_loader = train_loader
         self._test_loader = test_loader
-        self._entropy_regularization = 1 / len(train_loader)
+        if self._entropy_regularization is None:
+            self._entropy_regularization = 50 / len(train_loader)
         if outlier is not None:
             assert isinstance(outlier, tuple), "outlier dataset must be " \
                 "provided in the format (outlier_train, outlier_test)"
@@ -394,11 +413,11 @@ class FuncParVIAlgorithm(ParVIAlgorithm):
         outputs = aug_outputs[:data.shape[0]]  # [B, P, D]
         outputs = outputs.transpose(0, 1)
         outputs = outputs.view(num_particles, -1)  # [P, B * D]
-
+        
         density_outputs = aug_outputs[-extra_samples.shape[0]:]  # [b, P, D]
         density_outputs = density_outputs.transpose(0, 1)  # [P, b, D]
         density_outputs = density_outputs.view(num_particles, -1)  # [P, b * D]
-
+        
         return outputs, density_outputs
 
     def _function_neglogprob(self, targets, outputs):
@@ -531,6 +550,7 @@ class FuncParVIAlgorithm(ParVIAlgorithm):
         entropy_outlier = entropy_fn(probs_outlier.T.cpu().detach().numpy())
         auroc_entropy = self._auc_score(entropy, entropy_outlier)
         logging.info("AUROC score: {}".format(auroc_entropy))
+        alf.summary.scalar(name='eval/auroc', data=auroc_entropy)
 
 
     def _auc_score(self, inliers, outliers):

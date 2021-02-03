@@ -77,6 +77,9 @@ class FuncParVIUncertaintyTest(parameterized.TestCase, alf.test.TestCase):
         gridx, gridy = torch.meshgrid(x, y)
         grid = torch.stack((gridx.reshape(-1), gridy.reshape(-1)), -1)
         outputs = algorithm.predict_step(grid).output.cpu()
+        if i >= 45000 and i <= 50000:
+            print ('saving')
+            torch.save(outputs, basedir+'/final_outputs_{}.pt'.format(i))
         outputs = F.softmax(outputs, -1).detach()  # [B, D]
 
         mean_outputs = outputs.mean(1).cpu()  # [B, D]
@@ -105,10 +108,13 @@ class FuncParVIUncertaintyTest(parameterized.TestCase, alf.test.TestCase):
         plt.close('all')
 
     @parameterized.parameters(
-        ('svgd', False),
-        ('svgd', True),
-        ('gfsf', False),
-        ('gfsf', True),
+        #('svgd', False),
+        #('svgd', True),
+        #('gfsf', False),
+        #('gfsf', True),
+        #('minmax', True),
+        #('minmax', False),
+        (None, False),
     )
     def test_classification_func_par_vi(self,
                                         par_vi='svgd',
@@ -130,12 +136,10 @@ class FuncParVIUncertaintyTest(parameterized.TestCase, alf.test.TestCase):
         input_size = 2
         output_dim = 4
         input_spec = TensorSpec((input_size, ), torch.float64)
-        train_batch_size = 100
-        
-        train_nsamples = 100
         test_nsamples = 200
         batch_size = 100
-        inputs, targets = self.generate_class_data(train_nsamples, n_classes)
+        train_batch_size = 100
+        inputs, targets = self.generate_class_data(batch_size, n_classes)
         test_inputs, test_targets = self.generate_class_data(
             test_nsamples, n_classes)
 
@@ -150,10 +154,13 @@ class FuncParVIUncertaintyTest(parameterized.TestCase, alf.test.TestCase):
             function_vi=function_vi,
             function_bs=train_batch_size,
             function_extra_bs_ratio=0.1,
+            critic_hidden_layers=(184,),
+            critic_iter_num=5,
+            critic_optimizer=alf.optimizers.Adam(lr=1e-2),
             optimizer=alf.optimizers.Adam(lr=1e-2))
         
         def _train(i, entropy_regularization=None):
-            perm = torch.randperm(train_nsamples)
+            perm = torch.randperm(batch_size)
             idx = perm[:train_batch_size]
             train_inputs = inputs[idx]
             train_targets = targets[idx]
@@ -195,11 +202,11 @@ class FuncParVIUncertaintyTest(parameterized.TestCase, alf.test.TestCase):
                     tag += 'f-vi'
                 self.plot_classification(i, algorithm, tag)
         
-        train_iter = 10000
-        #for i in range(train_iter):
-        #    _train(i)
-        #    if i % 1000 == 0:
-        #        _test(i)
+        train_iter = 50000
+        for i in range(train_iter):
+            _train(i)
+            if i % 1000 == 0:
+                _test(i)
         
     def generate_regression_data(self, n_train, n_test):
         x_train1 = torch.linspace(-6, -2, n_train//2).view(-1, 1)
@@ -253,7 +260,7 @@ class FuncParVIUncertaintyTest(parameterized.TestCase, alf.test.TestCase):
         output_dim = 1
         input_spec = TensorSpec((input_size, ), torch.float64)
         train_batch_size = n_train
-        batch_size = n_train
+        batch_size = n_train//10
 
         train_samples, test_samples = self.generate_regression_data(
             n_train, n_test)
@@ -282,6 +289,7 @@ class FuncParVIUncertaintyTest(parameterized.TestCase, alf.test.TestCase):
             train_targets = targets[idx]
             if entropy_regularization is None:
                 entropy_regularization = train_batch_size / batch_size
+                entropy_regularization = 1.0
             
             alg_step = algorithm.train_step(
                 inputs=(train_inputs, train_targets),
@@ -293,7 +301,7 @@ class FuncParVIUncertaintyTest(parameterized.TestCase, alf.test.TestCase):
             outputs, _ = algorithm._param_net(test_inputs)
             mse_err = (outputs.mean(1) - test_targets).pow(2).mean()
             print ('Expected MSE: {}'.format(mse_err))
-        
+        """
         for i in range(20000):
             _train()
             if i % 1000 == 0:
@@ -304,6 +312,6 @@ class FuncParVIUncertaintyTest(parameterized.TestCase, alf.test.TestCase):
                     if function_vi:
                         tag += '_fvi'
                     self.plot_bnn_regression(i, algorithm, data, tag)
-        
+        """
 if __name__ == "__main__":
     alf.test.main()

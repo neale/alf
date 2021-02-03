@@ -54,10 +54,15 @@ class FuncParVIAlgorithmTest(parameterized.TestCase, alf.test.TestCase):
         self.assertEqual(x.shape, y.shape)
         self.assertGreater(float(torch.min(x - y)), eps)
 
-    @parameterized.parameters(#('gfsf', False),
-                              ('svgd', False),
+    @parameterized.parameters(
+                              #('gfsf', False),
                               #('gfsf', True),
-                              #('svgd', True)
+                              #('svgd', True),
+                              #('svgd', False),
+                              #('minmax', False),
+                              #('minmax', True),
+                              (None, False),
+                              #(None, True),
     )
     def test_functional_par_vi_algorithm(self,
                                          par_vi='svgd',
@@ -75,11 +80,17 @@ class FuncParVIAlgorithmTest(parameterized.TestCase, alf.test.TestCase):
         match the posterior :math:`p(\beta|X,y)` for both svgd and gfsf.
         
         """
+        print ('par vi: {}\nfunction_vi: {}\nparticles: {}\nbatch size: {}'.format(
+            par_vi, function_vi, num_particles, train_batch_size))
         input_size = 3
         input_spec = TensorSpec((input_size, ), torch.float32)
         output_dim = 1
         batch_size = 100
         inputs = input_spec.randn(outer_dims=(batch_size, ))
+        beta = torch.rand(input_size, output_dim) + 5.
+        print("beta: {}".format(beta))
+        beta = torch.rand(input_size, output_dim) + 5.
+        print("beta: {}".format(beta))
         beta = torch.rand(input_size, output_dim) + 5.
         print("beta: {}".format(beta))
         noise = torch.randn(batch_size, output_dim)
@@ -96,7 +107,11 @@ class FuncParVIAlgorithmTest(parameterized.TestCase, alf.test.TestCase):
             par_vi=par_vi,
             function_vi=function_vi,
             function_bs=train_batch_size,
-            optimizer=alf.optimizers.Adam(lr=1e-2))
+            critic_hidden_layers=(3,),
+            critic_l2_weight=10,
+            critic_use_bn=True,
+            optimizer=alf.optimizers.Adam(lr=1e-2),
+            critic_optimizer=alf.optimizers.Adam(lr=1e-2))
         print("ground truth mean: {}".format(true_mean))
         print("ground truth cov: {}".format(true_cov))
         print("ground truth cov norm: {}".format(true_cov.norm()))
@@ -111,6 +126,7 @@ class FuncParVIAlgorithmTest(parameterized.TestCase, alf.test.TestCase):
                 train_inputs, train_targets = train_batch
             if entropy_regularization is None:
                 entropy_regularization = train_batch_size / batch_size
+            
             alg_step = algorithm.train_step(
                 inputs=(train_inputs, train_targets),
                 entropy_regularization=entropy_regularization)
@@ -140,7 +156,7 @@ class FuncParVIAlgorithmTest(parameterized.TestCase, alf.test.TestCase):
             print("train_iter {}: cov err {}".format(i, cov_err))
             print("computed_cov norm: {}".format(computed_cov.norm()))
 
-        train_iter = 10000
+        train_iter = 50000
         for i in range(train_iter):
             _train()
             if i % 1000 == 0:

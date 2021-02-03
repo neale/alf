@@ -509,7 +509,7 @@ class SLTrainer(Trainer):
         
         if self._eval_uncertainty:
             outlier_train, outlier_test = create_dataset(
-                dataset_name='mnist_outlier')
+                dataset_name=config.outlier_dataset)
         else:
             outlier_train = None
             outlier_test = None
@@ -555,7 +555,7 @@ class SLTrainer(Trainer):
                 if self._evaluate:
                     self._algorithm.evaluate()
                 if self._eval_uncertainty:
-                    self._algorithm.eval_uncertianty()
+                    self._algorithm.eval_uncertainty()
                 break
 
             if self._num_epochs and epoch_num >= time_to_checkpoint:

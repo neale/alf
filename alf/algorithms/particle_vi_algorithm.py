@@ -17,6 +17,7 @@ import gin
 import numpy as np
 import torch
 
+import alf
 from alf.algorithms.algorithm import Algorithm
 from alf.algorithms.mi_estimator import MIEstimator
 from alf.data_structures import AlgStep, LossInfo, namedtuple
@@ -25,6 +26,73 @@ from alf.networks import Network, EncodingNetwork
 from alf.tensor_specs import TensorSpec
 from alf.utils import common, math_ops
 from alf.utils.averager import AdaptiveAverager
+
+
+@gin.configurable
+class CriticAlgorithm(Algorithm):
+    """
+    Wrap a critic network as an Algorithm for flexible gradient updates
+    called by the Generator when par_vi is 'minmax'.
+    """
+
+    def __init__(self,
+                 input_tensor_spec,
+                 output_dim=None,
+                 hidden_layers=(3, 3),
+                 activation=torch.relu_,
+                 net: Network = None,
+                 use_bn=True,
+                 optimizer=None,
+                 name="CriticAlgorithm"):
+        """Create a CriticAlgorithm.
+        Args:
+            input_tensor_spec (TensorSpec): spec of inputs. 
+            output_dim (int): dimension of output, default value is input_dim.
+            hidden_layers (tuple): size of hidden layers.
+            activation (nn.functional): activation used for all critic layers.
+            net (Network): network for predicting outputs from inputs.
+                If None, a default one with hidden_layers will be created
+            use_bn (bool): whether use batch norm for each critic layers.
+            optimizer (torch.optim.Optimizer): (optional) optimizer for training.
+            name (str): name of this CriticAlgorithm.
+        """
+        if optimizer is None:
+            optimizer = alf.optimizers.Adam(lr=1e-3)
+        super().__init__(train_state_spec=(), optimizer=optimizer, name=name)
+
+        self._input_dim = input_tensor_spec.shape[0]
+        self._output_dim = output_dim
+        if output_dim is None:
+            self._output_dim = input_tensor_spec.shape[0]
+        if net is None:
+            net = EncodingNetwork(
+                input_tensor_spec=input_tensor_spec,
+                fc_layer_params=hidden_layers,
+                use_fc_bn=use_bn,
+                activation=activation,
+                last_layer_size=self._output_dim,
+                last_activation=math_ops.identity,
+                last_use_fc_bn=use_bn,
+                name='Critic')
+        self._net = net
+
+    def reset_net_parameters(self):
+        for fc in self._net._fc_layers:
+            fc.reset_parameters()
+
+    def predict_step(self, inputs, state=None):
+        """Predict for one step of inputs.
+        Args:
+            inputs (torch.Tensor): inputs for prediction.
+            state: not used.
+        Returns:
+            AlgStep:
+            - output (torch.Tensor): predictions or (predictions, diag_jacobian)
+                if requires_jac_diag is True.
+            - state: not used.
+        """
+        outputs = self._net(inputs)[0]
+        return AlgStep(output=outputs, state=(), info=())
 
 
 @gin.configurable
@@ -52,7 +120,13 @@ class ParVIAlgorithm(Algorithm):
                  num_particles=10,
                  entropy_regularization=1.,
                  par_vi="gfsf",
+                 critic_input_dim=None,
+                 critic_iter_num=2,
+                 critic_l2_weight=10.,
+                 critic_use_bn=True,
+                 critic_hidden_layers=(100,100),
                  optimizer=None,
+                 critic_optimizer=None,
                  debug_summaries=False,
                  name="ParVIAlgorithm"):
         r"""Create a ParVIAlgorithm.
@@ -87,6 +161,21 @@ class ParVIAlgorithm(Algorithm):
             self._grad_func = self._gfsf_grad
         elif par_vi == 'svgd':
             self._grad_func = self._svgd_grad
+        elif par_vi == 'minmax':
+            self._grad_func = self._minmax_grad
+            if critic_input_dim is None:
+                critic_input_dim = particle_dim
+            self._critic_iter_num = critic_iter_num
+            self._critic_l2_weight = critic_l2_weight
+            if critic_optimizer is None:
+                critic_optimizer = alf.optimizers.Adam(lr=1e-3)
+            self._critic = CriticAlgorithm(
+                TensorSpec(shape=(critic_input_dim, )),
+                hidden_layers=critic_hidden_layers,
+                use_bn=critic_use_bn,
+                optimizer=critic_optimizer)
+        elif par_vi == None:
+            self._grad_func = self._ml_grad
         else:
             raise ValueError("Unsupported par_vi method: %s" % par_vi)
 
@@ -170,6 +259,7 @@ class ParVIAlgorithm(Algorithm):
 
         return self._kernel_width_averager.get()
 
+   
     def _rbf_func(self, x, y):
         r"""
         Compute the rbf kernel and its gradient w.r.t. first entry 
@@ -191,7 +281,7 @@ class ParVIAlgorithm(Algorithm):
         assert Dx == Dy
         diff = x.unsqueeze(1) - y.unsqueeze(0)  # [Nx, Ny, W]
         dist_sq = torch.sum(diff**2, -1)  # [Nx, Ny]
-        # h = self._kernel_width(dist_sq.view(-1))
+        #h = self._kernel_width(dist_sq.view(-1))
         h, _ = torch.median(dist_sq.view(-1), dim=0)
         if h == 0.:
             h = torch.ones_like(h)
@@ -230,6 +320,28 @@ class ParVIAlgorithm(Algorithm):
         kappa_grad = torch.einsum('ij,ijk->jk', kappa, -2 * diff / h)  # [N, D]
 
         return kappa_inv @ kappa_grad
+    
+    def _ml_grad(self,
+                 particles,
+                 loss_func,
+                 entropy_regularization=None,
+                 transform_func=None):
+        if transform_func is not None:
+            particles, extra_particles, _ = transform_func(particles)
+            aug_particles = torch.cat([particles, extra_particles], dim=-1)
+        else:
+            aug_particles = particles
+        loss_inputs = particles
+        loss = loss_func(loss_inputs)
+        if isinstance(loss, tuple):
+            neglogp = loss.loss
+        else:
+            neglogp = loss
+        grad = torch.autograd.grad(neglogp.sum(), loss_inputs)[0]
+        loss_propagated = torch.sum(grad.detach() * particles, dim=-1)
+
+        return loss, loss_propagated
+
 
     def _svgd_grad(self,
                    particles,
@@ -296,3 +408,68 @@ class ParVIAlgorithm(Algorithm):
         loss_propagated = loss_prop_neglogp + loss_prop_logq
 
         return loss, loss_propagated
+
+    def _jacobian_trace(self, fx, x):
+        """Hutchinson's trace Jacobian estimator O(1) call to autograd,
+            used by "\"minmax\" method"""
+        assert fx.shape[-1] == x.shape[-1], (
+            "Jacobian is not square, no trace defined.")
+        eps = torch.randn_like(fx)
+        jvp = torch.autograd.grad(
+            fx, x, grad_outputs=eps, retain_graph=True, create_graph=True)[0]
+        tr_jvp = torch.einsum('bi,bi->b', jvp, eps)
+        return tr_jvp
+
+    def _critic_train_step(self, inputs, loss_func, entropy_regularization=1.):
+        """
+        Compute the loss for critic training.
+        """
+        loss = loss_func(inputs)
+        if isinstance(loss, tuple):
+            neglogp = loss.loss
+        else:
+            neglogp = loss
+        loss_grad = torch.autograd.grad(neglogp.sum(), inputs)[0]  # [N, D]
+        outputs = self._critic.predict_step(inputs).output
+        tr_gradf = self._jacobian_trace(outputs, inputs)  # [N]
+
+        f_loss_grad = (loss_grad.detach() * outputs).sum(1)  # [N]
+        loss_stein = f_loss_grad - entropy_regularization * tr_gradf  # [N]
+
+        l2_penalty = (outputs * outputs).sum(1).mean() * self._critic_l2_weight
+        critic_loss = loss_stein.mean() + l2_penalty
+
+        return critic_loss
+
+
+    def _minmax_grad(self,
+                     particles,
+                     loss_func,
+                     entropy_regularization,
+                     transform_func=None):
+        """
+        Compute particle gradients via minmax svgd (Fisher Neural Sampler). 
+        """
+        if transform_func is not None:
+            aug_particles, extra_particles = transform_func(particles)
+            #aug_particles = torch.cat([particles, extra_particles], dim=-1)
+        else:
+            aug_particles = particles
+
+        for i in range(self._critic_iter_num):
+            critic_inputs = aug_particles.detach().clone()
+            critic_inputs.requires_grad = True
+
+            critic_loss = self._critic_train_step(critic_inputs, loss_func,
+                                                  entropy_regularization)
+            self._critic.update_with_gradient(LossInfo(loss=critic_loss))
+        
+        loss_inputs = aug_particles
+        # compute amortized svgd
+        loss = loss_func(loss_inputs.detach())
+        critic_outputs = self._critic.predict_step(aug_particles.detach()).output
+        loss_propagated = torch.sum(-critic_outputs.detach() * aug_particles, dim=-1)
+
+        return loss, loss_propagated
+
+

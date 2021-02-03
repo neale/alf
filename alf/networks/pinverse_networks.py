@@ -95,16 +95,15 @@ class PinverseNetwork(Network):
             joint_hidden_size = hidden_size
         if joint_fc_layer_params is None:
             joint_fc_layer_params = (joint_hidden_size, joint_hidden_size,
-                                     joint_hidden_size,# joint_hidden_size,
-            )
+                                     joint_hidden_size)
         self._joint_encoder = EncodingNetwork(
             TensorSpec(shape=(joint_hidden_size, )),
             fc_layer_params=joint_fc_layer_params,
             activation=activation,
             kernel_initializer=kernel_initializer,
             last_layer_size=output_dim,
-            #use_fc_bn=True,
-            last_use_fc_bn=True,
+            use_fc_bn=False,
+            last_use_fc_bn=False,
             last_activation=math_ops.identity)
 
     def forward(self, inputs, state=()):

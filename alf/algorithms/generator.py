@@ -395,17 +395,13 @@ class Generator(Algorithm):
                 self._grad_func = self._rkhs_func_grad
                 if force_fullrank:
                     self._eps_dim = output_dim
-                    hidden_size = 544
                 else:
                     self._eps_dim = noise_dim
-                    hidden_size = 10
             elif functional_gradient == 'minmax':
                 assert force_fullrank is True, (
                     "force fullrank when using minmax functional gradient!")
                 self._grad_func = self._minmax_func_grad
                 self._eps_dim = None
-                critic_hidden_size = 100
-                hidden_size = 100
                 self._critic_iter_num = critic_iter_num
                 self._critic_l2_weight = critic_l2_weight
                 self._minmax_resample = minmax_resample
@@ -645,9 +641,9 @@ class Generator(Algorithm):
         width, _ = torch.median(dist, dim=0)
         width = width / np.log(len(dist))
         #self._kernel_width_averager.update(width)
+        #return self._kernel_width_averager.get()
         return width
 
-        return self._kernel_width_averager.get()
 
     def _rbf_func(self, x, y):
         """Compute RGF kernel, used by svgd_grad. """

@@ -283,7 +283,7 @@ class HyperNetwork(Algorithm):
         self._train_loader = train_loader
         self._test_loader = test_loader
         if self._entropy_regularization is None:
-            self._entropy_regularization = 1 / len(train_loader)
+            self._entropy_regularization = 50 / len(train_loader)
         if outlier is not None:
             assert isinstance(outlier, tuple), "outlier dataset must be " \
                 "provided in the format (outlier_train, outlier_test)"

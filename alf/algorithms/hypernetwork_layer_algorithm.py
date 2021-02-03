@@ -40,14 +40,17 @@ HyperNetworkLossInfo = namedtuple("HyperNetworkLossInfo", ["loss", "extra"])
 
 
 def classification_loss(output, target):
+    if output.ndim == 2:
+        output = output.reshape(output.shape[0], target.shape[1], -1)
     pred = output.max(-1)[1]
+    target = target.squeeze(-1)
     acc = pred.eq(target).float().mean(0)
     avg_acc = acc.mean()
-    if output.ndim == 2:  # function_vi
-        target = target.reshape(-1)
-        output = output.reshape(target.shape[0], -1)
-    else:
+    if output.ndim == 3:  # function_vi
         output = output.transpose(1, 2)
+    else:
+        output = output.reshape(output.shape[0]*target.shape[1], -1)
+        target = target.reshape(-1)
     loss = F.cross_entropy(output, target)
     return HyperNetworkLossInfo(loss=loss, extra=avg_acc)
 
@@ -105,7 +108,7 @@ class HyperNetwork(Algorithm):
                  critic_l2_weight=10.,
                  function_vi=False,
                  function_bs=None,
-                 function_extra_bs_ratio=0.1,
+                 function_extra_bs_ratio=0.01,
                  function_extra_bs_sampler='uniform',
                  function_extra_bs_std=1.,
                  functional_gradient=None,
@@ -310,7 +313,7 @@ class HyperNetwork(Algorithm):
         self._train_loader = train_loader
         self._test_loader = test_loader
         if self._entropy_regularization is None:
-            self._entropy_regularization = 1/ len(train_loader)
+            self._entropy_regularization = 50/ len(train_loader)
         if outlier is not None:
             assert isinstance(outlier, tuple), "outlier dataset must be " \
                 "provided in the format (outlier_train, outlier_test)"
@@ -556,8 +559,6 @@ class HyperNetwork(Algorithm):
         if num_particles is None:
             num_particles = 100
         params = self.sample_parameters(num_particles=num_particles)
-       # if self._functional_gradient:
-       #     params, _ = params
         if self._generator._par_vi == 'minmax':
             params = params[0]
         self._param_net.set_parameters(params)
@@ -571,6 +572,7 @@ class HyperNetwork(Algorithm):
         probs_outlier = F.softmax(outputs_outlier, -1).mean(0)
         entropy_outlier = entropy_fn(probs_outlier.T.cpu().detach().numpy())
         auroc_entropy = self._auc_score(entropy, entropy_outlier)
+        alf.summary.scalar(name='eval/auroc', data=auroc_entropy)
         logging.info("AUROC score: {}".format(auroc_entropy))
 
         if auroc_entropy >= 0.98:
@@ -659,7 +661,8 @@ class HyperNetwork(Algorithm):
         model_outputs = torch.cat(outputs, dim=1)  # [N, B, D]
         return model_outputs
 
-    def summarize_train(self, loss_info, params, cum_loss=None, avg_acc=None):
+    def summarize_train(self, loss_info, params, cum_loss=None, avg_acc=None,
+                        auroc=None):
         """Generate summaries for training & loss info after each gradient update.
         The default implementation of this function only summarizes params
         (with grads) and the loss. An algorithm can override this for additional
@@ -682,3 +685,5 @@ class HyperNetwork(Algorithm):
             alf.summary.scalar(name='train_epoch/neglogprob', data=cum_loss)
         if avg_acc is not None:
             alf.summary.scalar(name='train_epoch/avg_acc', data=avg_acc)
+        if auroc is not None:
+            alf.summary.scalar(name='train_epoch/auroc', data=auroc)
