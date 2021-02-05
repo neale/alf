@@ -35,6 +35,8 @@ from alf.tensor_specs import TensorSpec
 from alf.utils import common, math_ops, summary_utils
 from alf.utils.summary_utils import record_time
 
+import uncertainty_metrics.numpy as um
+
 
 HyperNetworkLossInfo = namedtuple("HyperNetworkLossInfo", ["loss", "extra"])
 
@@ -51,6 +53,8 @@ def classification_loss(output, target):
     else:
         output = output.reshape(output.shape[0]*target.shape[1], -1)
         target = target.reshape(-1)
+    if target.ndim == 1:
+        target = target.view(-1, 1)
     loss = F.cross_entropy(output, target)
     return HyperNetworkLossInfo(loss=loss, extra=avg_acc)
 
@@ -364,7 +368,6 @@ class HyperNetwork(Algorithm):
                     params, _ = params
         self._param_net.set_parameters(params)
         outputs, _ = self._param_net(inputs)
-        print (outputs.shape)
         return AlgStep(output=outputs, state=(), info=())
      
     def train_iter(self, num_particles=None, state=None):
@@ -521,14 +524,11 @@ class HyperNetwork(Algorithm):
 
     def evaluate(self, num_particles=None):
         """Evaluate on a randomly drawn network. """
-
         assert self._test_loader is not None, "Must set test_loader first."
         logging.info("==> Begin testing")
         if self._use_fc_bn:
             self._generator.eval()
         params = self.sample_parameters(num_particles=num_particles)
-        #if self._functional_gradient:
-        #    params, _ = params
         self._param_net.set_parameters(params)
         if self._use_fc_bn:
             self._generator.train()
@@ -539,7 +539,11 @@ class HyperNetwork(Algorithm):
             for i, (data, target) in enumerate(self._test_loader):
                 data = data.to(alf.get_default_device())
                 target = target.to(alf.get_default_device())
+                params = self.sample_parameters(num_particles=num_particles)
+                self._param_net.set_parameters(params)
                 output, _ = self._param_net(data)  # [B, N, D]
+                if output.ndim == 2:
+                    output = output.unsqueeze(1)
                 loss, extra = self._vote(output, target)
                 if self._loss_type == 'classification':
                     test_acc += extra.item()
@@ -563,21 +567,25 @@ class HyperNetwork(Algorithm):
             params = params[0]
         self._param_net.set_parameters(params)
         with torch.no_grad():
-            outputs = self._predict_dataset(self._test_loader, num_particles)
-        probs = F.softmax(outputs, -1).mean(0)
+            outputs, labels = self._predict_dataset(self._test_loader,
+                                                    num_particles)
+        probs = F.softmax(outputs.mean(0), -1)
         entropy = entropy_fn(probs.T.cpu().detach().numpy())
         with torch.no_grad():
-            outputs_outlier = self._predict_dataset(self._outlier_test,
-                                                    num_particles)
-        probs_outlier = F.softmax(outputs_outlier, -1).mean(0)
+            outputs_outlier, _ = self._predict_dataset(self._outlier_test,
+                                                      num_particles)
+        probs_outlier = F.softmax(outputs_outlier.mean(0), -1)
         entropy_outlier = entropy_fn(probs_outlier.T.cpu().detach().numpy())
         auroc_entropy = self._auc_score(entropy, entropy_outlier)
         alf.summary.scalar(name='eval/auroc', data=auroc_entropy)
         logging.info("AUROC score: {}".format(auroc_entropy))
-
-        if auroc_entropy >= 0.98:
-            torch.save(outputs_outlier, 'probs_outlier_{}.pt'.format(auroc_entropy))
-            torch.save(outputs, 'probs_inlier_{}.pt'.format(auroc_entropy))
+        ece_score = self._ece_score(probs, labels)
+        alf.summary.scalar(name='eval/ece', data=ece_score)
+        logging.info("ECE score: {}".format(ece_score))
+        import csv
+        with open('aucece.csv', 'a') as f:
+            writer = csv.writer(f, delimiter=',')
+            writer.writerow([str(num_particles), auroc_entropy, ece_score, '\n'])
 
     def _classification_vote(self, output, target):
         """ensmeble the ooutputs from sampled classifiers."""
@@ -631,7 +639,13 @@ class HyperNetwork(Algorithm):
         y_score = np.concatenate([inliers, outliers])
         return roc_auc_score(y_true, y_score)
     
-    def _predict_dataset(self, testset, predictor_size=None):
+    def _ece_score(self, probs, labels, bins=15):
+        labels = labels.cpu().numpy()
+        probs = probs.detach().cpu().numpy()
+        ece = um.ece(labels, probs, num_bins=bins)
+        return ece
+
+    def _predict_dataset(self, testset, num_particles=None):
         """
         Computes predictions for an input dataset. 
 
@@ -650,16 +664,20 @@ class HyperNetwork(Algorithm):
         else:
             cls = len(testset.dataset.classes)
         outputs = []
+        targets = []
         for batch, (data, target) in enumerate(testset):
             data = data.to(alf.get_default_device())
             target = target.to(alf.get_default_device())
+            targets.append(target.view(-1))
+            #params = self.sample_parameters(num_particles=num_particles)
+            #self._param_net.set_parameters(params)
             output, _ = self._param_net(data)
             if output.dim() == 2:
                 output = output.unsqueeze(1)
             output = output.transpose(0, 1)
             outputs.append(output)
         model_outputs = torch.cat(outputs, dim=1)  # [N, B, D]
-        return model_outputs
+        return model_outputs, torch.cat(targets, -1).view(-1)
 
     def summarize_train(self, loss_info, params, cum_loss=None, avg_acc=None,
                         auroc=None):

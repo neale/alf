@@ -3,6 +3,7 @@ import alf.trainers.policy_trainer
 
 # dataset config
 create_dataset.dataset_name='cifar_inlier'
+# create_dataset.dataset_name='cifar'
 create_dataset.train_batch_size=50
 create_dataset.test_batch_size=100
 
@@ -12,21 +13,26 @@ FC_LAYER_PARAMS = ((128, True), )
 
 func_parvi/Adam.lr=1e-3
 func_parvi/Adam.weight_decay=1e-4
+func_parvi_critic/Adam.lr=1e-4
+func_parvi_critic/Adam.weight_decay=1e-4
 
 # algorithm config
 FuncParVIAlgorithm.conv_layer_params=%CONV_LAYER_PARAMS
 FuncParVIAlgorithm.fc_layer_params=%FC_LAYER_PARAMS
 FuncParVIAlgorithm.num_particles=10
-FuncParVIAlgorithm.par_vi = None # 'svgd'
+FuncParVIAlgorithm.par_vi = 'svgd'
 FuncParVIAlgorithm.loss_type = 'classification'
 FuncParVIAlgorithm.entropy_regularization = 1.0
+FuncParVIAlgorithm.critic_iter_num=5
+FuncParVIAlgorithm.critic_hidden_layers=(512, 512)
 FuncParVIAlgorithm.optimizer=@func_parvi/Adam()
+FuncParVIAlgorithm.critic_optimizer=@func_parvi_critic/Adam()
 FuncParVIAlgorithm.logging_training=True
 FuncParVIAlgorithm.logging_evaluate=True
 
 # training config
 TrainerConfig.algorithm_ctor=@FuncParVIAlgorithm
-TrainerConfig.num_epochs=100
+TrainerConfig.num_epochs=300
 TrainerConfig.num_checkpoints=2
 TrainerConfig.evaluate=True
 TrainerConfig.eval_uncertainty=True
@@ -35,8 +41,4 @@ TrainerConfig.summary_interval=1
 TrainerConfig.debug_summaries=True
 TrainerConfig.summarize_grads_and_vars=True
 TrainerConfig.outlier_dataset='cifar_outlier'
-
-
-
-
 

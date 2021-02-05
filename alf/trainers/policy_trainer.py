@@ -535,14 +535,18 @@ class SLTrainer(Trainer):
         while True:
             logging.info("-" * 68)
             logging.info("Epoch: {}".format(epoch_num + 1))
-            with record_time("time/train_iter"):
-                self._algorithm.train_iter()
 
+            #with record_time("time/train_iter"):
+            #    self._algorithm.train_iter()
+            
+            #eval_particles = 10
+            eval_particles = epoch_num-begin_epoch_num+1
+            print ('eval particles: ', eval_particles)
             if self._evaluate and (epoch_num + 1) % self._eval_interval == 0:
-                self._algorithm.evaluate()
+                self._algorithm.evaluate(num_particles=eval_particles)
             
             if (self._eval_uncertainty and (epoch_num + 1) % self._eval_interval == 0):
-                self._algorithm.eval_uncertainty()
+                self._algorithm.eval_uncertainty(num_particles=eval_particles)
 
             if epoch_num == begin_epoch_num:
                 self._summarize_training_setting()
@@ -553,9 +557,9 @@ class SLTrainer(Trainer):
 
             if (self._num_epochs and epoch_num >= self._num_epochs):
                 if self._evaluate:
-                    self._algorithm.evaluate()
+                    self._algorithm.evaluate(num_particles=eval_particles)
                 if self._eval_uncertainty:
-                    self._algorithm.eval_uncertainty()
+                    self._algorithm.eval_uncertainty(num_particles=eval_particles)
                 break
 
             if self._num_epochs and epoch_num >= time_to_checkpoint:

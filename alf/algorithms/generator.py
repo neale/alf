@@ -298,7 +298,7 @@ class Generator(Algorithm):
                  fullrank_diag_weight=1.0,
                  pinverse_solve_iters=1,
                  pinverse_hidden_size=100,
-                 use_jac_regularization=True,
+                 use_jac_regularization=False,
                  critic_input_dim=None,
                  critic_hidden_layers=(100, 100),
                  critic_l2_weight=10.,
@@ -352,8 +352,6 @@ class Generator(Algorithm):
             name (str): name of this generator
         """
         super().__init__(train_state_spec=(), optimizer=optimizer, name=name)
-        assert noise_dim <= output_dim, (
-            "noise_dim is higher than the output_dim of the generator!")
         self._output_dim = output_dim
         self._noise_dim = noise_dim
         self._entropy_regularization = entropy_regularization

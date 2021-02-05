@@ -166,7 +166,7 @@ class HyperNetworkTest(parameterized.TestCase, alf.test.TestCase):
             
             loss_info, params = algorithm.update_with_gradient(alg_step.info)
         
-        def _test(i, sampled_predictive=False):
+        def _test(i, sampled_predictive=False, s=100):
 
             print("-" * 68)
             if parameterization == 'layer':
@@ -175,7 +175,7 @@ class HyperNetworkTest(parameterized.TestCase, alf.test.TestCase):
             else:
                 weight = algorithm._generator._net._fc_layers[0].weight
                 learned_mean = algorithm._generator._net._fc_layers[0].bias
-
+            print (weight.shape)
             learned_cov = weight @ weight.t()
             print("norm of generator weight: {}".format(weight.norm()))
             print("norm of learned cov: {}".format(learned_cov.norm()))

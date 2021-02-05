@@ -33,7 +33,7 @@ from alf.tensor_specs import TensorSpec
 from alf.nest.utils import get_outer_rank
 from alf.utils import common, math_ops, summary_utils
 from alf.utils.summary_utils import record_time
-
+import uncertainty_metrics.numpy as um
 FuncParVILossInfo = namedtuple("FuncParVILossInfo", ["loss", "extra"])
 
 
@@ -477,7 +477,7 @@ class FuncParVIAlgorithm(ParVIAlgorithm):
             target = target.unsqueeze(1).expand(*target.shape[:1], num_particles)
         return self._loss_func(output, target)
 
-    def evaluate(self):
+    def evaluate(self, num_particles=None):
         """Evaluate on a randomly drawn ensemble. """
 
         assert self._test_loader is not None, "Must set test_loader first."
@@ -491,6 +491,9 @@ class FuncParVIAlgorithm(ParVIAlgorithm):
                 data = data.to(alf.get_default_device())
                 target = target.to(alf.get_default_device())
                 output, _ = self._param_net(data)  # [B, N, D]
+                if num_particles is not None:
+                    idxs = torch.randint(0, self._num_particles, (num_particles,))
+                    output = torch.index_select(output, 1, idxs)
                 loss, extra = self._vote(output, target)
                 if self._loss_type == 'classification':
                     test_acc += extra.item()
@@ -538,19 +541,26 @@ class FuncParVIAlgorithm(ParVIAlgorithm):
         total_loss = regression_loss(output, target)
         return loss, total_loss
     
-    def eval_uncertainty(self):
+    def eval_uncertainty(self, num_particles=None):
         # Soft voting for now
         with torch.no_grad():
-            outputs = self._predict_dataset(self._test_loader)
-        probs = F.softmax(outputs, -1).mean(0)
+            outputs, labels = self._predict_dataset(self._test_loader,
+                                                        num_particles)
+        probs = F.softmax(outputs.mean(0), -1)
+        
+
         entropy = entropy_fn(probs.T.cpu().detach().numpy())
         with torch.no_grad():
-            outputs_outlier = self._predict_dataset(self._outlier_test)
-        probs_outlier = F.softmax(outputs_outlier, -1).mean(0)
+            outputs_outlier, _ = self._predict_dataset(self._outlier_test,
+                                                        num_particles)
+        probs_outlier = F.softmax(outputs_outlier.mean(0), -1)
         entropy_outlier = entropy_fn(probs_outlier.T.cpu().detach().numpy())
         auroc_entropy = self._auc_score(entropy, entropy_outlier)
         logging.info("AUROC score: {}".format(auroc_entropy))
         alf.summary.scalar(name='eval/auroc', data=auroc_entropy)
+        ece_score = self._ece_score(probs, labels)
+        alf.summary.scalar(name='eval/ece', data=ece_score)
+        logging.info("ECE score: {}".format(ece_score))
 
 
     def _auc_score(self, inliers, outliers):
@@ -572,7 +582,13 @@ class FuncParVIAlgorithm(ParVIAlgorithm):
         y_score = np.concatenate([inliers, outliers])
         return roc_auc_score(y_true, y_score)
     
-    def _predict_dataset(self, testset):
+    def _ece_score(self, probs, labels, bins=15):
+        labels = labels.cpu().numpy()
+        probs = probs.detach().cpu().numpy()
+        ece = um.ece(labels, probs, num_bins=bins)
+        return ece
+
+    def _predict_dataset(self, testset, num_particles=None):
         """
         Computes predictions for an input dataset. 
 
@@ -591,16 +607,21 @@ class FuncParVIAlgorithm(ParVIAlgorithm):
         else:
             cls = len(testset.dataset.classes)
         outputs = []
+        targets = []
         for batch, (data, target) in enumerate(testset):
             data = data.to(alf.get_default_device())
             target = target.to(alf.get_default_device())
             output, _ = self._param_net(data)
+            if num_particles is not None:
+                idxs = torch.randint(0, output.shape[1], (num_particles,))
+                output = torch.index_select(output, 1, idxs)
+            targets.append(target.view(-1))
             if output.dim() == 2:
                 output = output.unsqueeze(1)
             output = output.transpose(0, 1)
             outputs.append(output)
         model_outputs = torch.cat(outputs, dim=1)  # [N, B, D]
-        return model_outputs
+        return model_outputs, torch.cat(targets, -1).view(-1)
 
     def summarize_train(self, loss_info, params, cum_loss=None, avg_acc=None):
         """Generate summaries for training & loss info after each gradient update.

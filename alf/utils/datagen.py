@@ -227,8 +227,8 @@ def load_notmnist(train_bs=100, test_bs=100, num_workers=0):
 
 
 def load_cifar(train_bs=32, test_bs=100):
-    path = 'data_c/'
-    kwargs = {'num_workers': 1, 'pin_memory': False, 'drop_last': True}
+    path = 'data_c10/'
+    kwargs = {'num_workers': 0, 'pin_memory': False, 'drop_last': True}
     transform_train = transforms.Compose([
         transforms.ToTensor(),
         transforms.Normalize((0.4914, 0.4822, 0.4465),
@@ -251,7 +251,7 @@ def load_cifar(train_bs=32, test_bs=100):
 
 
 def load_cifar_hidden(train_bs=32, test_bs=100, c_idx=[0, 1, 2, 3, 4]):
-    path = './data_c'
+    path = './data_c10'
     kwargs = {'num_workers': 2, 'pin_memory': False, 'drop_last': True}
     transform_train = transforms.Compose([
         transforms.ToTensor(),

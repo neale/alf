@@ -58,16 +58,16 @@ class FuncParVIAlgorithmTest(parameterized.TestCase, alf.test.TestCase):
                               #('gfsf', False),
                               #('gfsf', True),
                               #('svgd', True),
-                              #('svgd', False),
+                              ('svgd', False),
                               #('minmax', False),
                               #('minmax', True),
-                              (None, False),
+                              #(None, False),
                               #(None, True),
     )
     def test_functional_par_vi_algorithm(self,
                                          par_vi='svgd',
                                          function_vi=False,
-                                         num_particles=256,
+                                         num_particles=100,
                                          train_batch_size=10):
         """
         The hypernetwork is trained to generate the parameter vector for a linear
@@ -133,14 +133,17 @@ class FuncParVIAlgorithmTest(parameterized.TestCase, alf.test.TestCase):
 
             loss_info, params = algorithm.update_with_gradient(alg_step.info)
 
-        def _test(i):
+        def _test(i, s=100):
             params = algorithm.particles
+            idx = torch.randint(0, 100, (s,))
+            params = torch.index_select(params, 0, idx)
             computed_mean = params.mean(0)
             computed_cov = self.cov(params)
 
             print("-" * 68)
             pred_step = algorithm.predict_step(inputs)
-            preds = pred_step.output.squeeze()  # [batch, n_particles]
+            output = torch.index_select(pred_step.output, 1, idx)
+            preds = output.squeeze()  # [batch, n_particles]
             computed_preds = inputs @ computed_mean  # [batch]
 
             pred_err = torch.norm((preds - targets).mean(1))
@@ -156,11 +159,14 @@ class FuncParVIAlgorithmTest(parameterized.TestCase, alf.test.TestCase):
             print("train_iter {}: cov err {}".format(i, cov_err))
             print("computed_cov norm: {}".format(computed_cov.norm()))
 
-        train_iter = 50000
+        train_iter = 20000
         for i in range(train_iter):
             _train()
-            if i % 1000 == 0:
-                _test(i)
+            #if i % 1000 == 0:
+            #    _test(i, 100)
+        for s in range(2, 100):
+            print ('test with {} particles'.format(s))
+            _test(i, s)
 
         params = algorithm.particles
         computed_mean = params.mean(0)
