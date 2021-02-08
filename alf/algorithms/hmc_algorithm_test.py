@@ -28,6 +28,7 @@ import matplotlib.pyplot as plt
 from scipy.stats import entropy
 import matplotlib.cm as cm
 import seaborn as sns
+matplotlib.rcParams.update({'font.size': 18})
 
 
 class BNN(nn.Module):
@@ -100,7 +101,7 @@ class HMCTest(alf.test.TestCase):
         plt.plot(x_test, mean.T, label='posterior mean', alpha=0.9)
         plt.scatter(x_train, y_train.cpu().numpy(),color='r', marker='+',
             label='train pts', alpha=1.0, s=50)
-        plt.legend(fontsize=14, loc='best')
+        plt.legend(fontsize=18, loc='best')
         plt.ylim([-6, 8])
         plt.savefig('plots/hmc_bnn_ss0005.png')
         plt.close('all')
@@ -149,29 +150,31 @@ class HMCTest(alf.test.TestCase):
             print ('Expected MSE: {}'.format(
                 ((preds.mean(0) - test_labels)**2).mean()))
             return preds
-        
+        """
         params = []
-        if False:
+        if True:
             for i in range(10):
                 hmc_params = _train()
-                params = torch.stack(hmc_params).detach().cpu().numpy()
-                np.save('plots/hmc/trial_ss0005/hmc_regression_params_{}.npy'.format(i), _params)
+                _params = torch.stack(hmc_params).detach().cpu().numpy()
+                #np.save('plots/hmc/trial_ss0005/hmc_regression_params_{}.npy'.format(i), _params)
                 #_params = np.load('plots/hmc/trial10k/hmc_regression_params_{}.npy'.format(i))
-                params.append(torch.from_numpy(_params))
+                _params = torch.from_numpy(_params).reshape(-1, 151)
+                params.append(_params)
         
-        #params = _train()
-        #params = torch.stack(params)
-        #print (params.shape)
-        #params = params[:, ::100, :]
-        #hmc_params = params.reshape(-1, 151).cuda()[-4000:]
-        #hmc_params = hmc_params[::25]
-        #bnn_preds = _test(hmc_params)
-        #self.plot_bnn_regression(bnn_preds, (train_samples, test_samples))
+        params = _train()
+        params = torch.cat(params, 0)
+        print (params.shape)
+        hmc_params = params.cuda()[-4000:]
+        hmc_params = hmc_params[::25]
+        bnn_preds = _test(hmc_params)
+        self.plot_bnn_regression(bnn_preds, (train_samples, test_samples))
+        """
     
-    def generate_class_data(self,
-        n_samples=100,
-        means=[(2., 2.), (-2., 2.), (2., -2.), (-2., -2.)]):
-        #means=[(2., 2.), (-2., -2.)]):
+    def generate_class_data(self, n_samples=100, n_classes=4):
+        if n_classes == 4:
+            means = [(2., 2.), (-2., 2.), (2., -2.), (-2., -2.)]
+        else:
+            means = [(2., 2.), (-2., -2.)]
         data = torch.zeros(n_samples, 2)
         labels = torch.zeros(n_samples)
         size = n_samples//len(means)
@@ -186,40 +189,44 @@ class HMCTest(alf.test.TestCase):
         plt.close('all')
         return data, labels.long()
     
-    def plot_bnn_classification(self, i, algorithm, samples):
+    def plot_bnn_classification(self, i, algorithm, samples, n_classes):
         x = torch.linspace(-12, 12, 100)
         y = torch.linspace(-12, 12, 100)
         gridx, gridy = torch.meshgrid(x, y)
         grid = torch.stack((gridx.reshape(-1), gridy.reshape(-1)), -1)
         outputs, _ = algorithm.predict_model(grid, y=None, samples=samples)
         outputs = F.softmax(outputs, dim=-1)  # [B, D]
-        torch.save(outputs, 'plots/hmc/classification/outputs_{}.pt'.format(i))
+        torch.save(outputs, 'plots/classification/hmc/{}cls/outputs_{}.pt'.format(
+            n_classes, i))
         mean_outputs = outputs.mean(0).cpu()
         std_outputs = outputs.std(0).cpu()
 
         conf_std = std_outputs.max(-1)[0] * 1.96
         labels = mean_outputs.argmax(-1)
-        data, _ = self.generate_class_data(n_samples=400) 
+        data, _ = self.generate_class_data(n_samples=400, n_classes=n_classes) 
         
         p1 = plt.scatter(grid[:, 0].cpu(), grid[:, 1].cpu(), c=conf_std, cmap='rainbow')
         p2 = plt.scatter(data[:, 0].cpu(), data[:, 1].cpu(), c='black')
         cbar = plt.colorbar(p1)
         cbar.set_label("confidance (std)")
-        plt.savefig('plots/hmc/classification/conf_map-std_{}.png'.format(i))
+        plt.savefig('plots/classification/hmc/{}cls/conf_map-std_{}.png'.format(
+            n_classes, i))
         plt.close('all')
         
         p1 = plt.scatter(grid[:, 0].cpu(), grid[:, 1].cpu(), c=labels, cmap='rainbow')
         p2 = plt.scatter(data[:, 0].cpu(), data[:, 1].cpu(), c='black')
         cbar = plt.colorbar(p1)
         cbar.set_label("predicted labels")
-        plt.savefig('plots/hmc/classification/conf_map-labels_{}.png'.format(i))
+        plt.savefig('plots/classification/hmc/{}cls/conf_map-labels_{}.png'.format(
+            n_classes, i))
         plt.close('all')
 
     def test_BayesianNNClassification(self):
         n_train = 100
         n_test = 20
-        inputs, targets = self.generate_class_data(n_train)
-        net = BNN([2, 10, 10, 4])
+        n_classes = 2
+        inputs, targets = self.generate_class_data(n_train, n_classes)
+        net = BNN([2, 10, 10, n_classes])
         params_init = torch.cat([p.flatten() for p in net.parameters()]).clone()
         tau_list = []
         tau = 1.
@@ -248,7 +255,7 @@ class HMCTest(alf.test.TestCase):
             return params_hmc
 
         def _test(hmc_params):
-            test_data, test_labels = self.generate_class_data(n_test)
+            test_data, test_labels = self.generate_class_data(n_test, n_classes)
             preds, log_probs = algorithm.predict_model(test_data, test_labels,
                 samples=hmc_params)
             print ('Expected test log probability: {}'.format(torch.stack(
@@ -257,14 +264,15 @@ class HMCTest(alf.test.TestCase):
                 F.cross_entropy(preds.mean(0), test_labels).mean()))
             return preds
         
-        #for i in range(10, 20):
-        #    hmc_params = _train()
-        #    bnn_preds = _test(hmc_params)
-        #    _params = torch.stack(hmc_params).detach().cpu()
-            #_parmas = _params[::25]
-        #    print ('plotting')
-        #    with torch.no_grad():
-        #        self.plot_bnn_classification(num_samples, algorithm, hmc_params)
+        for i in range(5, 10):
+            hmc_params = _train()
+            bnn_preds = _test(hmc_params)
+            _params = torch.stack(hmc_params).detach().cpu()
+           #_parmas = _params[::25]
+            print ('plotting')
+            with torch.no_grad():
+                os.makedirs('plots/classification/hmc/{}cls/'.format(n_classes), exist_ok=True)
+                self.plot_bnn_classification(i, algorithm, hmc_params, n_classes)
         
     def cov(self, data, rowvar=False):
         """Estimate a covariance matrix given data.
@@ -370,8 +378,8 @@ class HMCTest(alf.test.TestCase):
             self.assertLess(smean_err, .5)
             self.assertLess(scov_err, .5)
 
-        params_hmc = _train()
-        _test(params_hmc)
+        #params_hmc = _train()
+        #_test(params_hmc)
 
         print("ground truth mean: {}".format(true_mean))
         print("ground truth cov norm: {}".format(true_cov.norm()))

@@ -78,13 +78,11 @@ class HyperNetworkSampleTest(parameterized.TestCase, alf.test.TestCase):
         gridx, gridy = torch.meshgrid(x, y)
         grid = torch.stack((gridx.reshape(-1), gridy.reshape(-1)), -1)
         
-        #if (i >= 380000) and (i <= 390000):
-        if (i >= 45000) and (i <= 50000):
+        if (i == 154000) or (i == 150000) or (i == 188000):
+        #if (i >= 45000) and (i <= 50000):
             print ('saving')
             outputs = algorithm.predict_step(grid, num_particles=100).output.cpu()
             torch.save(outputs, basedir+'final_outputs100_{}.pt'.format(i))
-            outputs = algorithm.predict_step(grid, num_particles=512).output.cpu()
-            torch.save(outputs, basedir+'final_outputs512_{}.pt'.format(i))
         else:
             outputs = algorithm.predict_step(grid, num_particles=100).output.cpu()
         
@@ -113,12 +111,12 @@ class HyperNetworkSampleTest(parameterized.TestCase, alf.test.TestCase):
         plt.close('all')
 
     @parameterized.parameters(
-        ('svgd3', False, None),
+        #('svgd3', False, None),
         #('svgd3', True, None),
         #('svgd3', False, 'rkhs'),
         #('gfsf', False, None),
         #('gfsf', True, None),
-        #('minmax', False, None),
+        ('minmax', False, None),
         #('minmax', True, None),
         #('minmax', False, 'minmax'),
     )
@@ -154,15 +152,15 @@ class HyperNetworkSampleTest(parameterized.TestCase, alf.test.TestCase):
             param_dim = 184
         else:
             param_dim = 162
-        noise_dim = param_dim
-        hidden_size = 0
-        chidden_size =  param_dim
+        noise_dim = 64 # param_dim
+        hidden_size = 64
+        chidden_size =  64
         pinverse_iters = 1
-        pinverse_hidden_size = param_dim*3
+        pinverse_hidden_size = 1024 # param_dim*3
         lr = 1e-3
         weight_decay = 0
         critic_iter_num = 5
-        critic_l2_weight = 1.
+        critic_l2_weight = 10.
         algorithm = HyperNetwork(
             input_tensor_spec=input_spec,
             fc_layer_params=((10, True), (10, True)),
@@ -243,14 +241,14 @@ class HyperNetworkSampleTest(parameterized.TestCase, alf.test.TestCase):
                 else:
                     tag += '/'
                 if par_vi == 'minmax':
-                    sub = '{}cls_{}z_2h{}_40lr_ad{}w{}_{}iter_{}h_ci{}_l2{}'.format(
+                    sub = '{}cls/{}z_2h{}_40lr_ad{}w{}_{}iter_{}h_ci{}_l2{}'.format(
                         n_classes, noise_dim, hidden_size, lr, weight_decay,
                         pinverse_iters, pinverse_hidden_size, critic_iter_num,
                         critic_l2_weight)
                 else:
-                    sub = 'final_{}cls_{}z_2h{}_40lr_ad{}w{}_{}iter_{}h'.format(
+                    sub = '{}cls/{}z_2h{}_40lr_ad{}w{}_{}iter_{}h_{}p_2'.format(
                         n_classes, noise_dim, hidden_size, lr, weight_decay,
-                        pinverse_iters, pinverse_hidden_size)
+                        pinverse_iters, pinverse_hidden_size, num_particles)
                 tag += '{}/'.format(sub)
                 self.plot_classification(i, algorithm, n_classes, tag)
            
@@ -274,9 +272,9 @@ class HyperNetworkSampleTest(parameterized.TestCase, alf.test.TestCase):
         y_test = y_test + torch.ones_like(y_test).normal_(0, 0.04)
         return (x_train, y_train), (x_test, y_test)
     
-    def plot_bnn_regression(self, i, algorithm, data):
+    def plot_bnn_regression(self, i, algorithm, data, tag):
         sns.set_style('darkgrid')
-        basedir = 'plots/regression/functional_par_vi/{}/'.format(tag)
+        basedir = 'plots/regression/funcgrad_par_vi/{}/'.format(tag)
         os.makedirs(basedir, exist_ok=True)
         gt_x = torch.linspace(-6, 6, 500).view(-1, 1).cpu()
         gt_y = -(1+gt_x) * torch.sin(1.2*gt_x) 
@@ -295,7 +293,7 @@ class HyperNetworkSampleTest(parameterized.TestCase, alf.test.TestCase):
             label='train pts', alpha=1.0, s=50)
         plt.legend(fontsize=14, loc='best')
         plt.ylim([-6, 8])
-        plt.savefig('plots/{}/iter_{}.png'.format(basedir, i))
+        plt.savefig('{}/iter_{}.png'.format(basedir, i))
         plt.close('all')
     
     def test_BayesianNNRegression(self):
@@ -304,15 +302,15 @@ class HyperNetworkSampleTest(parameterized.TestCase, alf.test.TestCase):
         input_size = 1
         output_dim = 1
         noise_dim = 151
-        num_particles = 2
+        num_particles = 100
         amortize = True
         function_vi = False
-        functional_gradient =False
+        functional_gradient = 'rkhs'
         parameterization = 'network'
         input_spec = TensorSpec((input_size, ), torch.float64)
-        train_batch_size = n_train
+        train_batch_size = n_train//10
         batch_size = n_train
-
+        par_vi = 'svgd3'
         train_samples, test_samples = self.generate_regression_data(
             n_train, n_test)
         inputs, targets = train_samples
@@ -320,24 +318,24 @@ class HyperNetworkSampleTest(parameterized.TestCase, alf.test.TestCase):
         print ('Fitting BNN to regression data')
         algorithm = HyperNetwork(
             input_tensor_spec=input_spec,
-            fc_layer_params=((50, True),),#, (10, True)),
+            fc_layer_params=((50, True),),
             last_layer_param=(output_dim, True),
             last_activation=math_ops.identity,
             noise_dim=noise_dim,
-            hidden_layers=(noise_dim,),
+            hidden_layers=(32, 32),
             loss_type='regression',
             par_vi='svgd3',
-            functional_gradient=functional_gradient,
-            use_pinverse=True,
-            pinverse_resolve=False,
+            functional_gradient='rkhs',
             pinverse_solve_iters=1,
-            use_jac_regularization=False,
-            pinverse_batch_size=num_particles,
+            force_fullrank=True,
             function_vi=function_vi,
             function_bs=train_batch_size,
+            pinverse_hidden_size=453,
+            fullrank_diag_weight=1.0,
             num_particles=num_particles,
             parameterization=parameterization,
             optimizer=alf.optimizers.Adam(lr=1e-3),
+            pinverse_optimizer=alf.optimizers.Adam(lr=1e-4),
             critic_hidden_layers=(32,32),
             critic_optimizer=alf.optimizers.Adam(lr=1e-3))
         
