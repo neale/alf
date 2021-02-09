@@ -79,7 +79,7 @@ class HyperNetworkTest(parameterized.TestCase, alf.test.TestCase):
                                         function_vi=False,
                                         functional_gradient='rkhs',
                                         train_batch_size=10,
-                                        num_particles=100):
+                                        num_particles=50):
         """
         The hypernetwork is trained to generate the parameter vector for a linear
         regressor. The target linear regressor is :math:`y = X\beta + e`, where 
@@ -193,6 +193,10 @@ class HyperNetworkTest(parameterized.TestCase, alf.test.TestCase):
             print("\tpred err {}".format(pred_err))
             print("\tmean err {}".format(mean_err))
             print("\tcov err {}".format(cov_err))
+            import csv
+            with open('blr_stats_bicgstab_50p_1iter.csv', 'a') as f:
+                writer = csv.writer(f, delimiter=',')
+                writer.writerow([str(i), str(mean_err), str(cov_err)])
 
             if sampled_predictive:
                 params = algorithm.sample_parameters(num_particles=100)
@@ -215,6 +219,7 @@ class HyperNetworkTest(parameterized.TestCase, alf.test.TestCase):
                 scov_err = torch.norm(computed_cov - true_cov)
                 scov_err = scov_err / torch.norm(true_cov)
                 print("train_iter {}: sampled cov err {}".format(i, scov_err))
+            
 
         train_iter = 50000
         for i in range(train_iter):

@@ -113,10 +113,11 @@ class HyperNetworkSampleTest(parameterized.TestCase, alf.test.TestCase):
     @parameterized.parameters(
         #('svgd3', False, None),
         #('svgd3', True, None),
-        #('svgd3', False, 'rkhs'),
+        ('svgd3', False, 'rkhs'),
         #('gfsf', False, None),
         #('gfsf', True, None),
-        ('minmax', False, None),
+        #('minmax', False, None),
+
         #('minmax', True, None),
         #('minmax', False, 'minmax'),
     )
@@ -124,7 +125,7 @@ class HyperNetworkSampleTest(parameterized.TestCase, alf.test.TestCase):
                                          par_vi='minmax',
                                          function_vi=False,
                                          functional_gradient='rkhs',
-                                         n_classes=4,
+                                         n_classes=2,
                                          num_particles=100):
         """
         Symmetric 4-class classification problem. The training data are drawn
@@ -152,8 +153,8 @@ class HyperNetworkSampleTest(parameterized.TestCase, alf.test.TestCase):
             param_dim = 184
         else:
             param_dim = 162
-        noise_dim = 64 # param_dim
-        hidden_size = 64
+        noise_dim = param_dim
+        hidden_size = 0#64
         chidden_size =  64
         pinverse_iters = 1
         pinverse_hidden_size = 1024 # param_dim*3

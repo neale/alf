@@ -30,7 +30,7 @@ from alf.utils.averager import AdaptiveAverager
 
 import torch.nn.utils.spectral_norm as sn
 
-from scipy.sparse.linalg import bicg, bicgstab
+from scipy.sparse.linalg import bicg, bicgstab, cg
 
 GeneratorLossInfo = namedtuple("GeneratorLossInfo",
                                ["generator", "mi_estimator", "pinverse"])
@@ -298,6 +298,7 @@ class Generator(Algorithm):
                  fullrank_diag_weight=1.0,
                  pinverse_solve_iters=1,
                  pinverse_hidden_size=100,
+                 pinverse_use_solver=True,
                  use_jac_regularization=False,
                  critic_input_dim=None,
                  critic_hidden_layers=(100, 100),
@@ -395,6 +396,10 @@ class Generator(Algorithm):
                     self._eps_dim = output_dim
                 else:
                     self._eps_dim = noise_dim
+                if pinverse_use_solver:
+                    self._pinverse = None
+                    self._pinverse_optimizer = None
+
             elif functional_gradient == 'minmax':
                 assert force_fullrank is True, (
                     "force fullrank when using minmax functional gradient!")
@@ -420,21 +425,23 @@ class Generator(Algorithm):
 
             if noise_dim == output_dim:
                 force_fullrank = False
+            
             self._force_fullrank = force_fullrank
             self._fullrank_diag_weight = fullrank_diag_weight
             self._pinverse_solve_iters = pinverse_solve_iters
             self._use_jac_regularization = use_jac_regularization
+            self._pinverse_use_solver = pinverse_use_solver
 
-            if pinverse_optimizer is None:
-                pinverse_optimizer = alf.optimizers.Adam(
-                    lr=1e-4, weight_decay=1e-5)
-
-            self._pinverse = PinverseAlgorithm(
-                noise_dim,
-                output_dim,
-                eps_dim=self._eps_dim,
-                hidden_size=pinverse_hidden_size,
-                optimizer=pinverse_optimizer)
+            if not pinverse_use_solver:
+                if pinverse_optimizer is None:
+                    pinverse_optimizer = alf.optimizers.Adam(
+                        lr=1e-4, weight_decay=1e-5)
+                self._pinverse = PinverseAlgorithm(
+                    noise_dim,
+                    output_dim,
+                    eps_dim=self._eps_dim,
+                    hidden_size=pinverse_hidden_size,
+                    optimizer=pinverse_optimizer)
 
         self._kernel_width_averager = AdaptiveAverager(
             tensor_spec=TensorSpec(shape=()))
@@ -869,23 +876,47 @@ class Generator(Algorithm):
             assert eps.ndim == 3
             assert z.shape[0] == eps.shape[0]
             assert eps.shape[-1] == self._eps_dim
-            z_inputs = torch.repeat_interleave(
-                z_inputs, eps.shape[1], dim=0)  # [N2*N, K]
-            eps_inputs = eps.reshape(eps.shape[0] * eps.shape[1],
-                                     -1)  # [N2*N, D or K]
-            y = self._pinverse.predict_step((z_inputs, eps_inputs)).output
-            # [N2*N, D]
-            jac_y, _ = self._net.compute_vjp(z_inputs, y)  # [N2*N, K]
-            if self._force_fullrank:
-                jac_y = torch.cat(
-                    (jac_y,
-                     torch.zeros(jac_y.shape[0],
-                                 self._output_dim - self._noise_dim)),
-                    dim=-1)
-                jac_y += self._fullrank_diag_weight * y  # [N2*N, D]
-            jac_y = jac_y.reshape(z.shape[0], eps.shape[1],
-                                  -1)  # [N2, N, D or K]
-            loss = torch.nn.functional.mse_loss(jac_y, eps)
+            if self._pinverse_use_solver:
+                b2_dim, b_dim, d_dim = eps.shape
+                if self._pinverse is None:
+                    #self._pinverse = torch.zeros(*eps.shape, requires_grad=True)
+                    self._pinverse = torch.randn(*eps.shape, requires_grad=True)
+                    #self._pinverse = torch.nn.init.orthogonal_(self._pinverse)
+                    self._pinverse = self._pinverse.view(-1, d_dim)
+                jac = self._net.compute_jac(z_inputs)
+                jac = torch.repeat_interleave(jac, b_dim, dim=1)
+                jac = jac.view(-1, d_dim, d_dim).detach().cpu().numpy() # [B'*B, D, D]
+                eps = eps.view(-1, d_dim).detach().cpu().numpy()  # [B'*B, D]
+                for i in range(b_dim*b2_dim):
+                    A = jac[i]
+                    b = eps[i]
+                    y, exitCode = bicgstab(A,
+                                           b,
+                                           x0=self._pinverse[i].detach().cpu(),
+                                           maxiter=1,
+                                           atol=1e-2)  # [D]
+                    self._pinverse[i] = torch.from_numpy(y).to(
+                        alf.get_default_device())
+                    loss = ()
+                print (self._pinverse.norm().item())
+            else:
+                z_inputs = torch.repeat_interleave(
+                    z_inputs, eps.shape[1], dim=0)  # [N2*N, K]
+                eps_inputs = eps.reshape(eps.shape[0] * eps.shape[1],
+                                         -1)  # [N2*N, D or K]
+                y = self._pinverse.predict_step((z_inputs, eps_inputs)).output
+                # [N2*N, D]
+                jac_y, _ = self._net.compute_vjp(z_inputs, y)  # [N2*N, K]
+                if self._force_fullrank:
+                    jac_y = torch.cat(
+                        (jac_y,
+                         torch.zeros(jac_y.shape[0],
+                                     self._output_dim - self._noise_dim)),
+                        dim=-1)
+                    jac_y += self._fullrank_diag_weight * y  # [N2*N, D]
+                jac_y = jac_y.reshape(z.shape[0], eps.shape[1],
+                                      -1)  # [N2, N, D or K]
+                loss = torch.nn.functional.mse_loss(jac_y, eps)
 
         elif self._functional_gradient == 'minmax':
             assert eps is None
@@ -943,15 +974,19 @@ class Generator(Algorithm):
         for _ in range(self._pinverse_solve_iters):
             pinverse_loss = self._pinverse_train_step(gen_inputs2.detach(),
                                                       kernel_grad.detach())
-            self._pinverse.update_with_gradient(LossInfo(loss=pinverse_loss))
+            if not self._pinverse_use_solver:
+                self._pinverse.update_with_gradient(LossInfo(loss=pinverse_loss))
 
         # construct functional gradient via pinverse
         gen_inputs2_batch = torch.repeat_interleave(
             gen_inputs2, num_particles, dim=0).detach()
         kernel_grad_batch = kernel_grad.reshape(num_particles * num_particles,
                                                 -1).detach()
-        J_inv_kernel_grad = self._pinverse.predict_step(
-            (gen_inputs2_batch, kernel_grad_batch)).output  # [N2*N, D]
+        if self._pinverse_use_solver:
+            J_inv_kernel_grad = self._pinverse
+        else:
+            J_inv_kernel_grad = self._pinverse.predict_step(
+                (gen_inputs2_batch, kernel_grad_batch)).output  # [N2*N, D]
         J_inv_kernel_grad = J_inv_kernel_grad.reshape(
             num_particles, num_particles, -1)  # [N2, N, D]
 
