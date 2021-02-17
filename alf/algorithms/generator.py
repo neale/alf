@@ -298,7 +298,7 @@ class Generator(Algorithm):
                  fullrank_diag_weight=1.0,
                  pinverse_solve_iters=1,
                  pinverse_hidden_size=100,
-                 pinverse_use_solver=True,
+                 pinverse_use_solver=False,
                  use_jac_regularization=False,
                  critic_input_dim=None,
                  critic_hidden_layers=(100, 100),
@@ -496,7 +496,7 @@ class Generator(Algorithm):
             assert self._input_tensor_spec is None
             if noise is None:
                 assert batch_size is not None
-                noise = torch.randn(batch_size, self._noise_dim)
+                noise = torch.randn(batch_size, self._noise_dim)#.normal_(0, 4)
             gen_inputs = noise
         else:
             nest.assert_same_structure(inputs, self._input_tensor_spec)
@@ -529,7 +529,7 @@ class Generator(Algorithm):
                     outputs = (outputs, jac)
                 elif self._force_fullrank:
                     extra_noise = torch.randn(
-                        noise.shape[0], self._output_dim - self._noise_dim)
+                        noise.shape[0], self._output_dim - self._noise_dim)#.normal_(0, 1)
                     gen_inputs = torch.cat((gen_inputs, extra_noise), dim=-1)
                     outputs += self._fullrank_diag_weight * gen_inputs
             else:
@@ -887,6 +887,7 @@ class Generator(Algorithm):
                 jac = torch.repeat_interleave(jac, b_dim, dim=1)
                 jac = jac.view(-1, d_dim, d_dim).detach().cpu().numpy() # [B'*B, D, D]
                 eps = eps.view(-1, d_dim).detach().cpu().numpy()  # [B'*B, D]
+                p = []
                 for i in range(b_dim*b2_dim):
                     A = jac[i]
                     b = eps[i]
@@ -895,9 +896,9 @@ class Generator(Algorithm):
                                            x0=self._pinverse[i].detach().cpu(),
                                            maxiter=1,
                                            atol=1e-2)  # [D]
-                    self._pinverse[i] = torch.from_numpy(y).to(
-                        alf.get_default_device())
-                    loss = ()
+                    p.append(y)
+                self._pinverse = torch.as_tensor(np.stack(p))
+                loss = ()
                 print (self._pinverse.norm().item())
             else:
                 z_inputs = torch.repeat_interleave(

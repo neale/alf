@@ -24,14 +24,6 @@ from alf.algorithms.hypernetwork_layer_algorithm import HyperNetwork
 from alf.tensor_specs import TensorSpec
 from alf.utils import math_ops, datagen
 
-import matplotlib
-matplotlib.use('agg')
-import matplotlib.pyplot as plt
-import seaborn as sns
-
-from scipy.stats import entropy as entropy_fn
-from sklearn.metrics import roc_auc_score
-
 
 class HyperNetworkTest(parameterized.TestCase, alf.test.TestCase):
     def cov(self, data, rowvar=False):
@@ -65,13 +57,13 @@ class HyperNetworkTest(parameterized.TestCase, alf.test.TestCase):
         self.assertGreater(float(torch.min(x - y)), eps)
 
     @parameterized.parameters(
-                              #('svgd3', False, None), # A-SVGD
-                              #('svgd3', True, None),  #A-SVGD-fv
+                              ('svgd3', False, None), # A-SVGD
+                              ('svgd3', True, None),  #A-SVGD-fv
                               ('svgd3', False, 'rkhs'), #G-SVGD
-                              #('gfsf', False, None),  #A-GFSF
-                              #('gfsf', True, None),  #A-GFSF-fv
-                              #('minmax', False, None), #A-minmax
-                              #('minmax', True, None),  #A-minmax-fv
+                              ('gfsf', False, None),  #A-GFSF
+                              ('gfsf', True, None),  #A-GFSF-fv
+                              ('minmax', False, None), #A-minmax
+                              ('minmax', True, None),  #A-minmax-fv
                               #('minmax', False, 'minmax', 100),  #G-minmax
     )
     def test_bayesian_linear_regression(self,
@@ -79,7 +71,7 @@ class HyperNetworkTest(parameterized.TestCase, alf.test.TestCase):
                                         function_vi=False,
                                         functional_gradient='rkhs',
                                         train_batch_size=10,
-                                        num_particles=50):
+                                        num_particles=100):
         """
         The hypernetwork is trained to generate the parameter vector for a linear
         regressor. The target linear regressor is :math:`y = X\beta + e`, where 
@@ -193,10 +185,6 @@ class HyperNetworkTest(parameterized.TestCase, alf.test.TestCase):
             print("\tpred err {}".format(pred_err))
             print("\tmean err {}".format(mean_err))
             print("\tcov err {}".format(cov_err))
-            import csv
-            with open('blr_stats_bicgstab_50p_1iter.csv', 'a') as f:
-                writer = csv.writer(f, delimiter=',')
-                writer.writerow([str(i), str(mean_err), str(cov_err)])
 
             if sampled_predictive:
                 params = algorithm.sample_parameters(num_particles=100)

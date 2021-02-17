@@ -133,16 +133,13 @@ class FuncParVIAlgorithmTest(parameterized.TestCase, alf.test.TestCase):
 
             loss_info, params = algorithm.update_with_gradient(alg_step.info)
 
-        def _test(i, s=100):
+        def _test(i):
             params = algorithm.particles
-            idx = torch.randint(0, 100, (s,))
-            params = torch.index_select(params, 0, idx)
             computed_mean = params.mean(0)
             computed_cov = self.cov(params)
 
             print("-" * 68)
             pred_step = algorithm.predict_step(inputs)
-            output = torch.index_select(pred_step.output, 1, idx)
             preds = output.squeeze()  # [batch, n_particles]
             computed_preds = inputs @ computed_mean  # [batch]
 
@@ -162,11 +159,8 @@ class FuncParVIAlgorithmTest(parameterized.TestCase, alf.test.TestCase):
         train_iter = 20000
         for i in range(train_iter):
             _train()
-            #if i % 1000 == 0:
-            #    _test(i, 100)
-        for s in range(2, 100):
-            print ('test with {} particles'.format(s))
-            _test(i, s)
+            if i % 1000 == 0:
+                _test(i)
 
         params = algorithm.particles
         computed_mean = params.mean(0)

@@ -1,8 +1,0 @@
-0,"tensor(1.0627, grad_fn=<DivBackward0>)","tensor(42.4303, grad_fn=<DivBackward0>)"
-1000,"tensor(nan, grad_fn=<DivBackward0>)","tensor(nan, grad_fn=<DivBackward0>)"
-2000,"tensor(nan, grad_fn=<DivBackward0>)","tensor(nan, grad_fn=<DivBackward0>)"
-3000,"tensor(nan, grad_fn=<DivBackward0>)","tensor(nan, grad_fn=<DivBackward0>)"
-4000,"tensor(nan, grad_fn=<DivBackward0>)","tensor(nan, grad_fn=<DivBackward0>)"
-5000,"tensor(nan, grad_fn=<DivBackward0>)","tensor(nan, grad_fn=<DivBackward0>)"
-6000,"tensor(nan, grad_fn=<DivBackward0>)","tensor(nan, grad_fn=<DivBackward0>)"
-0,"tensor(1.0631, grad_fn=<DivBackward0>)","tensor(42.5312, grad_fn=<DivBackward0>)"
