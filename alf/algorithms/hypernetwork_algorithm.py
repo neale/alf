@@ -30,15 +30,27 @@ from alf.networks import EncodingNetwork, ParamNetwork
 from alf.tensor_specs import TensorSpec
 from alf.utils import common, math_ops, summary_utils
 from alf.utils.summary_utils import record_time
+import uncertainty_metrics.numpy as um
+
 
 HyperNetworkLossInfo = namedtuple("HyperNetworkLossInfo", ["loss", "extra"])
 
 
 def classification_loss(output, target):
+    if output.ndim == 2:
+        output = output.reshape(output.shape[0], target.shape[1], -1)
     pred = output.max(-1)[1]
+    target = target.squeeze(-1)
     acc = pred.eq(target).float().mean(0)
     avg_acc = acc.mean()
-    loss = F.cross_entropy(output.transpose(1, 2), target)
+    if output.ndim == 3:  # function_vi
+        output = output.transpose(1, 2)
+    else:
+        output = output.reshape(output.shape[0]*target.shape[1], -1)
+        target = target.reshape(-1)
+    if target.ndim == 1:
+        target = target.view(-1, 1)
+    loss = F.cross_entropy(output, target)
     return HyperNetworkLossInfo(loss=loss, extra=avg_acc)
 
 
@@ -91,15 +103,23 @@ class HyperNetwork(Algorithm):
                  entropy_regularization=1.,
                  critic_optimizer=None,
                  critic_hidden_layers=(100, 100),
+                 critic_iter_num=2,
+                 critic_l2_weight=10,
                  function_vi=False,
                  function_bs=None,
                  function_extra_bs_ratio=0.1,
                  function_extra_bs_sampler='uniform',
                  function_extra_bs_std=1.,
+                 functional_gradient=None,
+                 force_fullrank=True,
+                 pinverse_solve_iters=1,
+                 pinverse_hidden_size=100,
                  loss_type="classification",
                  voting="soft",
                  par_vi="svgd",
                  optimizer=None,
+                 critic_optimizer=None,
+                 pinverse_optimizer=None
                  logging_network=False,
                  logging_training=False,
                  logging_evaluate=False,
@@ -201,13 +221,21 @@ class HyperNetwork(Algorithm):
 
         gen_output_dim = param_net.param_length
         noise_spec = TensorSpec(shape=(noise_dim, ))
-        net = EncodingNetwork(
-            noise_spec,
-            fc_layer_params=hidden_layers,
-            use_fc_bn=use_fc_bn,
-            last_layer_size=gen_output_dim,
-            last_activation=math_ops.identity,
-            name="Generator")
+
+        if functional_gradient is not None:
+            net = ReluMLP(
+                noise_spec,
+                hidden_layers=hidden_layers,
+                output_size=gen_output_dim,
+                name='Generator')
+        else:
+            net = EncodingNetwork(
+                noise_spec,
+                fc_layer_params=hidden_layers,
+                use_fc_bn=use_fc_bn,
+                last_layer_size=gen_output_dim,
+                last_activation=math_ops.identity,
+                name="Generator")
 
         if logging_network:
             logging.info("Generated network")
@@ -246,8 +274,16 @@ class HyperNetwork(Algorithm):
             par_vi=par_vi,
             critic_input_dim=critic_input_dim,
             critic_hidden_layers=critic_hidden_layers,
+            critic_iter_num=critic_iter_num,
+            critic_l2_weight=critic_l2_weight,
+            functional_gradient=functional_gradient,
+            force_fullrank=force_fullrank,
+            pinverse_solve_iters=pinverse_solve_iters,
+            pinverse_hidden_size=pinverse_hidden_size,
+            use_jac_regularization=use_jac_regularization,
             optimizer=None,
             critic_optimizer=critic_optimizer,
+            pinverse_optimizer=pinverse_optimizer,
             name=name)
 
         self._param_net = param_net
@@ -258,6 +294,7 @@ class HyperNetwork(Algorithm):
         self._use_fc_bn = use_fc_bn
         self._loss_type = loss_type
         self._function_vi = function_vi
+        self._functional_gradient = functional_gradient
         self._logging_training = logging_training
         self._logging_evaluate = logging_evaluate
         self._config = config
@@ -273,24 +310,32 @@ class HyperNetwork(Algorithm):
         else:
             raise ValueError("Unsupported loss_type: %s" % loss_type)
 
-    def set_data_loader(self, train_loader, test_loader=None, outlier=None):
+    def set_data_loader(self,
+                        train_loader,
+                        test_loader=None,
+                        outlier_data_loaders=None,
+                        entropy_regularization=None):
         """Set data loadder for training and testing.
 
         Args:
             train_loader (torch.utils.data.DataLoader): training data loader
             test_loader (torch.utils.data.DataLoader): testing data loader
+            outlier_data_loader (tuple) (Optional): (train, test) dataloaders
+                for outlier dataset. Used for computing uncertainty metrics
+            entropy_regularization (float): weight of entropy regularization   
         """
         self._train_loader = train_loader
         self._test_loader = test_loader
-        if self._entropy_regularization is None:
-            self._entropy_regularization = 50 / len(train_loader)
-        if outlier is not None:
-            assert isinstance(outlier, tuple), "outlier dataset must be " \
-                "provided in the format (outlier_train, outlier_test)"
-            self._outlier_train = outlier[0]
-            self._outlier_test = outlier[1]
+        if self._entropy_regularization is not None:
+            self._entropy_regularization = entropy_regularization
+
+        if outlier_data_loaders is not None:
+            assert isinstance(outlier_data_loaders, tuple), "outlier "\
+                "data loaders must be in a tuple (train, test)"
+            self._outlier_train_loader = outlier_data_loaders[0]
+            self._outlier_test_loader = outlier_data_loaders[1]
         else:
-            self._outlier_train = self.outlier_test = None
+            self._outlier_train_loader = self.outlier_test_loader = None
 
     def set_num_particles(self, num_particles):
         """Set the number of particles to sample through one forward

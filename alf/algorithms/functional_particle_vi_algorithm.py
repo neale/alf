@@ -26,6 +26,7 @@ from sklearn.metrics import roc_auc_score
 import alf
 from alf.algorithms.algorithm import Algorithm
 from alf.algorithms.config import TrainerConfig
+from alf.algorithms.hypernetwork_algorithm import classification_loss, regression_loss
 from alf.algorithms.particle_vi_algorithm import ParVIAlgorithm
 from alf.data_structures import AlgStep, LossInfo, namedtuple
 from alf.networks import EncodingNetwork, ParamNetwork
@@ -35,33 +36,6 @@ from alf.utils import common, math_ops, summary_utils
 from alf.utils.summary_utils import record_time
 import uncertainty_metrics.numpy as um
 FuncParVILossInfo = namedtuple("FuncParVILossInfo", ["loss", "extra"])
-
-
-def classification_loss(output, target):
-    if output.ndim == 2:
-        output = output.reshape(output.shape[0], target.shape[1], -1)
-    pred = output.max(-1)[1]
-    target = target.squeeze(-1)
-    acc = pred.eq(target).float().mean(0)
-    avg_acc = acc.mean()
-    if output.dim == 3:
-        output = output.transpose(1, 2)
-    else:
-        output = output.reshape(output.shape[0]*target.shape[1], -1)
-        target = target.reshape(-1)
-    loss = F.cross_entropy(output, target)
-    return FuncParVILossInfo(loss=loss, extra=avg_acc)
-
-
-def regression_loss(output, target):
-    out_shape = output.shape[-1]
-    assert (target.shape[-1] == out_shape), (
-        "feature dimension of output and target does not match.")
-    loss = 0.5 * F.mse_loss(
-        output.reshape(-1, out_shape),
-        target.reshape(-1, out_shape),
-        reduction='sum')
-    return FuncParVILossInfo(loss=loss, extra=())
 
 
 def _expand_to_replica(inputs, replicas, spec):
@@ -103,7 +77,6 @@ class FuncParVIAlgorithm(ParVIAlgorithm):
     def __init__(self,
                  input_tensor_spec=None,
                  param_net: ParamNetwork = None,
-                 train_state_spec=(),
                  conv_layer_params=None,
                  fc_layer_params=None,
                  activation=torch.relu_,
@@ -139,8 +112,6 @@ class FuncParVIAlgorithm(ParVIAlgorithm):
                 the input. If nested, then ``preprocessing_combiner`` must not be
                 None.
             param_net (ParamNetwork): input parametric network.
-            train_state_spec (nested TensorSpec): for the network state of
-                ``train_step()``.
             conv_layer_params (tuple[tuple]): a tuple of tuples where each
                 tuple takes a format 
                 ``(filters, kernel_size, strides, padding, pooling_kernel)``,
@@ -148,14 +119,14 @@ class FuncParVIAlgorithm(ParVIAlgorithm):
             fc_layer_params (tuple[tuple]): a tuple of tuples where each tuple
                 takes a format ``(FC layer sizes. use_bias)``, where 
                 ``use_bias`` is optional.
-            activation (nn.functional): activation used for all the layers but
+            activation (Callable): activation used for all the layers but
                 the last layer.
             last_layer_param (tuple): an optional tuple of the format
                 ``(size, use_bias)``, where ``use_bias`` is optional,
                 it appends an additional layer at the very end. 
                 Note that if ``last_activation`` is specified, 
                 ``last_layer_param`` has to be specified explicitly.
-            last_activation (nn.functional): activation function of the
+            last_activation (Callable): activation function of the
                 additional layer specified by ``last_layer_param``. Note that if
                 ``last_layer_param`` is not None, ``last_activation`` has to be
                 specified explicitly.
@@ -223,7 +194,6 @@ class FuncParVIAlgorithm(ParVIAlgorithm):
 
         super().__init__(
             particle_dim,
-            train_state_spec=train_state_spec,
             num_particles=num_particles,
             entropy_regularization=entropy_regularization,
             par_vi=par_vi,
@@ -268,7 +238,11 @@ class FuncParVIAlgorithm(ParVIAlgorithm):
         else:
             raise ValueError("Unsupported loss_type: %s" % loss_type)
 
-    def set_data_loader(self, train_loader, test_loader=None, outlier=None):
+    def set_data_loader(self,
+                        train_loader,
+                        test_loader=None,
+                        outlier_data_loaders=None,
+                        entropy_regularization=None):
         """Set data loadder for training and testing.
 
         Args:
@@ -277,15 +251,16 @@ class FuncParVIAlgorithm(ParVIAlgorithm):
         """
         self._train_loader = train_loader
         self._test_loader = test_loader
-        if self._entropy_regularization is None:
-            self._entropy_regularization = 50 / len(train_loader)
-        if outlier is not None:
-            assert isinstance(outlier, tuple), "outlier dataset must be " \
-                "provided in the format (outlier_train, outlier_test)"
-            self._outlier_train = outlier[0]
-            self._outlier_test = outlier[1]
+        if entropy_regularization is not None:
+            self._entropy_regularization = entropy_regularization
+
+        if outlier_data_loaders is not None:
+            assert isinstance(outlier_data_loaders, tuple), "outlier dataset "\
+                "must be provided in the format (outlier_train, outlier_test)"
+            self._outlier_train_loader = outlier_data_loaders[0]
+            self._outlier_test_loader = outlier_data_loaders[1]
         else: 
-            self._outlier_train = self._outlier_test = None
+            self._outlier_train_loader = self._outlier_test_loader = None
  
     def predict_step(self, inputs, params=None, state=None):
         """Predict ensemble outputs for inputs using the hypernetwork model.
@@ -478,10 +453,10 @@ class FuncParVIAlgorithm(ParVIAlgorithm):
         return self._loss_func(output, target)
 
     def evaluate(self, num_particles=None):
-        """Evaluate on a randomly drawn ensemble. """
+        """Evaluate on the fixed ensemble. """
 
         assert self._test_loader is not None, "Must set test_loader first."
-        logging.info("==> Begin testing")
+        logging.info("==> Begin evaluating")
         self._param_net.set_parameters(self.particles)
         with record_time("time/test"):
             if self._loss_type == 'classification':
@@ -492,7 +467,9 @@ class FuncParVIAlgorithm(ParVIAlgorithm):
                 target = target.to(alf.get_default_device())
                 output, _ = self._param_net(data)  # [B, N, D]
                 if num_particles is not None:
-                    idxs = torch.randint(0, self._num_particles, (num_particles,))
+                    idxs = torch.randint(0,
+                                         self._num_particles,
+                                         (num_particles, ))
                     output = torch.index_select(output, 1, idxs)
                 loss, extra = self._vote(output, target)
                 if self._loss_type == 'classification':
@@ -638,11 +615,12 @@ class FuncParVIAlgorithm(ParVIAlgorithm):
             loss_info (LossInfo): loss
             params (list[Parameter]): list of parameters with gradients
         """
-        if self._config.summarize_grads_and_vars:
-            summary_utils.summarize_variables(params)
-            summary_utils.summarize_gradients(params)
-        if self._config.debug_summaries:
-            summary_utils.summarize_loss(loss_info)
+        if self._config is not None:
+            if self._config.summarize_grads_and_vars:
+                summary_utils.summarize_variables(params)
+                summary_utils.summarize_gradients(params)
+            if self._config.debug_summaries:
+                summary_utils.summarize_loss(loss_info)
         if cum_loss is not None:
             alf.summary.scalar(name='train_epoch/neglogprob', data=cum_loss)
         if avg_acc is not None:

@@ -1,4 +1,18 @@
-"""A generic generator."""
+# Copyright (c) 2020 Horizon Robotics and ALF Contributors. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+"""HMC algorithm."""
+
 
 from absl import logging
 import gin
@@ -28,7 +42,7 @@ class Scope(object):
 class HMC(Algorithm):
     """Hamiltonian Monte Carlo
 
-    MCMC method for obtaining a sequence of random variables that
+    Obtain a sequence of random variables that
     converge to a target distribution. 
     HMC corresponds to the MH algorithm, that evolves according to 
     hamiltonian dynamics. Where the MH algorithm uses a proposal distribution
@@ -37,7 +51,7 @@ class HMC(Algorithm):
 
     The algorithm is as follows:
     
-    1. Sample momentum by doing Gibbs sampling
+    1. Sample momentum with Gibbs sampling
     2. perform N leapfrog steps to move to new state
     3. accept/reject sample from new state
 
@@ -56,9 +70,9 @@ class HMC(Algorithm):
              tau_list=None,
              tau_out=.1,
              name="HMC"):
-        r"""Instantiate an HMC Sampler.
+        """Instantiate an HMC Sampler.
 
-        Args for training an HMC sampler
+        Args:
             log_prob_func (Callable):
             params (torch.tensor):
             num_samples (int):
@@ -369,6 +383,7 @@ class HMC(Algorithm):
                 child, params_box, child_params_offset)
             self_._modules[name] = fchild  # fchild is functional child
             setattr(self_, name, fchild)
+
         def fmodule(*args, **kwargs):
             if 'bias_None' in param_names:
                 params_box[0].insert(params_offset + 1, None)
@@ -378,7 +393,7 @@ class HMC(Algorithm):
                     setattr(self_, 'bias', None)
                 else:
                     setattr(self_, name, param)
-            return forward(self_, *args) #, **kwargs)
+            return forward(self_, *args)
         return child_params_offset, fmodule
 
     def _make_functional(self, module):

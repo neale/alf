@@ -37,6 +37,12 @@ class TestDataSet(torch.utils.data.Dataset):
     def __len__(self):
         return len(self._features)
 
+    def get_features(self):
+        return self._features
+
+    def get_targets(self):
+        return self._values
+
 
 def load_test(train_bs=50, test_bs=10, num_workers=0):
     input_dim = 3
@@ -55,6 +61,53 @@ def load_test(train_bs=50, test_bs=10, num_workers=0):
 
     return train_loader, test_loader
 
+
+class TestNClassDataSet(torch.utils.data.Dataset):
+    def __init__(self, num_classes=2, size=200):
+        self.num_classes = num_classes
+        if num_classes == 4:
+            means = [(2., 2.), (-2., 2.), (2., -2.), (-2., -2.)]
+        else:
+            means = [(2., 2.), (-2., -2.)]
+        data = torch.zeros(size, 2)
+        labels = torch.zeros(size)
+        size = size//len(means)
+        for i, (x, y) in enumerate(means):
+            dist = torch.distributions.Normal(torch.tensor([x, y]), .3)
+            samples = dist.sample([size])
+            data[size*i:size*(i+1)] = samples
+            labels[size*i:size*(i+1)] = torch.ones(len(samples)) * i
+    
+        self._features = data
+        self._labels = labels.long()
+
+    def __getitem__(self, index):
+        return self._features[index], self._labels[index]
+
+    def __len__(self):
+        return len(self._features)
+    
+    def get_features(self):
+        return self._features
+
+    def get_targets(self):
+        return self._labels
+    
+
+def load_nclass_test(num_classes,
+                     train_size,
+                     test_size,
+                     train_bs=100, 
+                     test_bs=100,
+                     num_workers=0):
+    trainset = TestNClassDataSet(num_classes, size=train_size)
+    testset = TestNClassDataSet(num_classes, size=test_size)
+    train_loader = torch.utils.data.DataLoader(
+        trainset, batch_size=train_bs, shuffle=True, num_workers=num_workers)
+    test_loader = torch.utils.data.DataLoader(
+        testset, batch_size=test_bs, shuffle=True, num_workers=num_workers)
+    
+    return train_loader, test_loader
 
 def get_classes(target, labels):
     """ select only given classes from target dataset """
