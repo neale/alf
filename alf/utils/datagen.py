@@ -174,7 +174,7 @@ def load_mnist(train_bs=100, test_bs=100, num_workers=0):
             download=True,
             transform=transforms.Compose([
                 transforms.ToTensor(),
-                transforms.Normalize((0.1307, ), (0.3081, ))
+                #transforms.Normalize((0.1307, ), (0.3081, ))
             ])),
         batch_size=train_bs,
         shuffle=True,
@@ -185,7 +185,7 @@ def load_mnist(train_bs=100, test_bs=100, num_workers=0):
             train=False,
             transform=transforms.Compose([
                 transforms.ToTensor(),
-                transforms.Normalize((0.1307, ), (0.3081, ))
+                #transforms.Normalize((0.1307, ), (0.3081, ))
             ])),
         batch_size=test_bs,
         shuffle=False,

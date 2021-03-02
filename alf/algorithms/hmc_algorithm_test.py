@@ -200,10 +200,19 @@ class HMCTest(alf.test.TestCase):
             n_classes, i))
         mean_outputs = outputs.mean(0).cpu()
         std_outputs = outputs.std(0).cpu()
+        conf_entropy = entropy(mean_outputs.T.numpy())
 
         conf_std = std_outputs.max(-1)[0] * 1.96
         labels = mean_outputs.argmax(-1)
         data, _ = self.generate_class_data(n_samples=400, n_classes=n_classes) 
+        
+        p1 = plt.scatter(grid[:, 0].cpu(), grid[:, 1].cpu(), c=conf_entropy, cmap='Blues')
+        p2 = plt.scatter(data[:, 0].cpu(), data[:, 1].cpu(), c='gray', edgecolors='black', s=15, alpha=0.8)
+        cbar = plt.colorbar(p1)
+        cbar.set_label("entropy")
+        plt.savefig('plots/classification/hmc/{}cls/entropy_{}.png'.format(
+            n_classes, i))
+        plt.close('all')
         
         p1 = plt.scatter(grid[:, 0].cpu(), grid[:, 1].cpu(), c=conf_std, cmap='rainbow')
         p2 = plt.scatter(data[:, 0].cpu(), data[:, 1].cpu(), c='black')
@@ -233,11 +242,11 @@ class HMCTest(alf.test.TestCase):
         for p in net.parameters():
             tau_list.append(tau)
         tau_list = torch.tensor(tau_list)
-        step_size = .005
-        num_samples = 10000
-        steps_per_sample = 25
+        step_size = .05
+        num_samples = 3000
+        steps_per_sample = 15
         tau_out = 1.
-        burn_in_steps= 9800
+        burn_in_steps= 2900
         print ('HMC: Fitting BNN to classification data')
         algorithm = HMC(
             params=params_init,
@@ -264,7 +273,7 @@ class HMCTest(alf.test.TestCase):
                 F.cross_entropy(preds.mean(0), test_labels).mean()))
             return preds
         
-        for i in range(5, 10):
+        for i in range(0, 10):
             hmc_params = _train()
             bnn_preds = _test(hmc_params)
             _params = torch.stack(hmc_params).detach().cpu()

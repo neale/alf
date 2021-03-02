@@ -38,6 +38,7 @@ class TrainerConfig(object):
                  eval_interval=10,
                  epsilon_greedy=0.1,
                  eval_uncertainty=False,
+                 eval_adv=False,
                  outlier_dataset=None,
                  num_eval_episodes=10,
                  summary_interval=50,
@@ -115,7 +116,8 @@ class TrainerConfig(object):
                 keys will be omitted and no error will be raised.
             evaluate (bool): A bool to evaluate when training
             eval_interval (int): evaluate every so many iteration
-            eval_uncertainty (bool): whether to evluate uncertainty after training
+            eval_uncertainty (bool): whether to evaluate uncertainty after training
+            eval_adv (bool): whether to evaluate adv after training
             epsilon_greedy (float): a floating value in [0,1], representing the
                 chance of action sampling instead of taking argmax. This can
                 help prevent a dead loop in some deterministic environment like
@@ -190,6 +192,7 @@ class TrainerConfig(object):
             evaluate=evaluate,
             eval_interval=eval_interval,
             eval_uncertainty=eval_uncertainty,
+            eval_adv=eval_adv,
             outlier_dataset=outlier_dataset,
             epsilon_greedy=epsilon_greedy,
             num_eval_episodes=num_eval_episodes,

@@ -138,6 +138,7 @@ class Trainer(object):
         self._evaluate = config.evaluate
         self._eval_interval = config.eval_interval
         self._eval_uncertainty = config.eval_uncertainty
+        self._eval_adv = config.eval_adv
 
         self._summary_interval = config.summary_interval
         self._summaries_flush_secs = config.summaries_flush_secs
@@ -536,18 +537,15 @@ class SLTrainer(Trainer):
             logging.info("-" * 68)
             logging.info("Epoch: {}".format(epoch_num + 1))
 
-            #with record_time("time/train_iter"):
-            #    self._algorithm.train_iter()
+            with record_time("time/train_iter"):
+                self._algorithm.train_iter()
             
-            #eval_particles = 10
-            eval_particles = epoch_num-begin_epoch_num+1
-            print ('eval particles: ', eval_particles)
             if self._evaluate and (epoch_num + 1) % self._eval_interval == 0:
-                self._algorithm.evaluate(num_particles=eval_particles)
+                self._algorithm.evaluate()
             
-            if (self._eval_uncertainty and (epoch_num + 1) % self._eval_interval == 0):
-                self._algorithm.eval_uncertainty(num_particles=eval_particles)
-
+            if self._eval_uncertainty and (epoch_num + 1) % self._eval_interval == 0:
+                self._algorithm.eval_uncertainty(use_adv=self._eval_adv, epoch=epoch_num)
+            
             if epoch_num == begin_epoch_num:
                 self._summarize_training_setting()
 
@@ -557,9 +555,10 @@ class SLTrainer(Trainer):
 
             if (self._num_epochs and epoch_num >= self._num_epochs):
                 if self._evaluate:
-                    self._algorithm.evaluate(num_particles=eval_particles)
+                    self._algorithm.evaluate()
                 if self._eval_uncertainty:
-                    self._algorithm.eval_uncertainty(num_particles=eval_particles)
+                    self._algorithm.eval_uncertainty(use_adv=self._eval_adv,
+                                                     epoch=epoch_num)
                 break
 
             if self._num_epochs and epoch_num >= time_to_checkpoint:

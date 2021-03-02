@@ -293,7 +293,7 @@ class ParamNetwork(Network):
                 length = length + fc_l.weight_length + fc_l.bias_length
             self._param_length = length
         return self._param_length
-
+    
     def set_parameters(self, theta, reinitialize=False):
         """Distribute parameters to corresponding layers. 
 

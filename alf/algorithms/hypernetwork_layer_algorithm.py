@@ -1,4 +1,4 @@
-# Copyright (c) 2020 Horizon Robotics. All Rights Reserved.
+# Copyright (c) 2021  orizon Robotics. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -36,6 +36,10 @@ from alf.utils import common, math_ops, summary_utils
 from alf.utils.summary_utils import record_time
 
 import uncertainty_metrics.numpy as um
+import torchvision
+import foolbox as foolbox
+from alf.networks.mnist_model import LeNet as MnistModel
+from alf.networks.mnist_model import LeNetEnsemble as MnistEnsemble
 
 
 HyperNetworkLossInfo = namedtuple("HyperNetworkLossInfo", ["loss", "extra"])
@@ -521,10 +525,12 @@ class HyperNetwork(Algorithm):
         target = target.unsqueeze(1).expand(*target.shape[:1], num_particles,
                                             *target.shape[1:])
         return self._loss_func(output, target)
-
+    
     def evaluate(self, num_particles=None):
         """Evaluate on a randomly drawn network. """
         assert self._test_loader is not None, "Must set test_loader first."
+        if num_particles is None:
+            num_particles = self._num_particles
         logging.info("==> Begin testing")
         if self._use_fc_bn:
             self._generator.eval()
@@ -558,34 +564,43 @@ class HyperNetwork(Algorithm):
             logging.info("Test loss: {}".format(test_loss))
         alf.summary.scalar(name='eval/test_loss', data=test_loss)
 
-    def eval_uncertainty(self, num_particles=None):
+    def eval_uncertainty(self, num_particles=None, use_adv=False, epoch=0):
         # Soft voting for now
         if num_particles is None:
-            num_particles = 100
+            num_particles = self._num_particles
         params = self.sample_parameters(num_particles=num_particles)
+        torch.save(params, 'training_params_epoch{}.pt'.format(epoch))
+        for i in range(50):
+            params = self.sample_parameters(num_particles=10)
+            torch.save(params, 'eval_params_epoch{}_iter{}.pt'.format(epoch, i))
+        """
         if self._generator._par_vi == 'minmax':
             params = params[0]
         self._param_net.set_parameters(params)
-        with torch.no_grad():
-            outputs, labels = self._predict_dataset(self._test_loader,
-                                                    num_particles)
+        outputs, labels = self._predict_dataset(self._test_loader,
+                                                num_particles)
+        outputs_outlier, _ = self._predict_dataset(self._outlier_test,
+                                                   num_particles)
+        if use_adv:
+            outputs_adv, _ = self._predict_dataset_adv(self._test_loader,
+                                                       num_particles,
+                                                       epoch=epoch)
+            probs_adv = F.softmax(outputs_adv.mean(0), -1)
+            entropy_adv = entropy_fn(probs_adv.T.cpu().detach().numpy())
         probs = F.softmax(outputs.mean(0), -1)
         entropy = entropy_fn(probs.T.cpu().detach().numpy())
-        with torch.no_grad():
-            outputs_outlier, _ = self._predict_dataset(self._outlier_test,
-                                                      num_particles)
         probs_outlier = F.softmax(outputs_outlier.mean(0), -1)
         entropy_outlier = entropy_fn(probs_outlier.T.cpu().detach().numpy())
         auroc_entropy = self._auc_score(entropy, entropy_outlier)
+        if use_adv:
+            auroc_adv_entropy = self._auc_score(entropy, entropy_adv)
+            logging.info("AUROC adv score: {}".format(auroc_adv_entropy))
         alf.summary.scalar(name='eval/auroc', data=auroc_entropy)
         logging.info("AUROC score: {}".format(auroc_entropy))
         ece_score = self._ece_score(probs, labels)
         alf.summary.scalar(name='eval/ece', data=ece_score)
         logging.info("ECE score: {}".format(ece_score))
-        import csv
-        with open('aucece.csv', 'a') as f:
-            writer = csv.writer(f, delimiter=',')
-            writer.writerow([str(num_particles), auroc_entropy, ece_score, '\n'])
+        """
 
     def _classification_vote(self, output, target):
         """ensmeble the ooutputs from sampled classifiers."""
@@ -644,7 +659,38 @@ class HyperNetwork(Algorithm):
         probs = probs.detach().cpu().numpy()
         ece = um.ece(labels, probs, num_bins=bins)
         return ece
+    
+    def _get_mnist_model(self):
+        return MnistModel(10).to(alf.get_default_device())
+    
+    def _to_ensemble(self, models):
+        return MnistEnsemble(models).eval()
 
+    def convert_to_model(self, models, params):
+        for model, p in zip(models, params):
+            pos = 0
+            model.conv1.weight = torch.nn.Parameter(p[pos:pos+6*5*5].view(6, 1, 5, 5))
+            pos += 6*5*5
+            model.conv1.bias = torch.nn.Parameter(p[pos:pos+6])
+            pos += 6
+            model.conv2.weight = torch.nn.Parameter(p[pos:pos+16*6*5*5].view(16, 6, 5, 5))
+            pos += 16*6*5*5
+            model.conv2.bias = torch.nn.Parameter(p[pos:pos+16].view(16))
+            pos += 16
+            model.linear1.weight = torch.nn.Parameter(p[pos:pos+120*400].view(120, 400))
+            pos += 120*400
+            model.linear1.bias = torch.nn.Parameter(p[pos:pos+120].view(120))
+            pos += 120
+            model.linear2.weight = torch.nn.Parameter(p[pos:pos+84*120].view(84, 120))
+            pos += 84*120
+            model.linear2.bias = torch.nn.Parameter(p[pos:pos+84].view(84))
+            pos += 84
+            model.linear3.weight = torch.nn.Parameter(p[pos:pos+10*84].view(10, 84))
+            pos += 10*84
+            model.linear3.bias = torch.nn.Parameter(p[pos:pos+10].view(10))
+            pos += 10
+        return models
+    
     def _predict_dataset(self, testset, num_particles=None):
         """
         Computes predictions for an input dataset. 
@@ -663,14 +709,17 @@ class HyperNetwork(Algorithm):
             cls = len(testset.dataset.dataset.classes)
         else:
             cls = len(testset.dataset.classes)
+        if num_particles is None:
+            num_particles = self._num_particles
         outputs = []
         targets = []
+        params = self.sample_parameters(num_particles=num_particles)
+        self._param_net = self._param_net.eval()
+
         for batch, (data, target) in enumerate(testset):
             data = data.to(alf.get_default_device())
             target = target.to(alf.get_default_device())
             targets.append(target.view(-1))
-            #params = self.sample_parameters(num_particles=num_particles)
-            #self._param_net.set_parameters(params)
             output, _ = self._param_net(data)
             if output.dim() == 2:
                 output = output.unsqueeze(1)
@@ -678,6 +727,89 @@ class HyperNetwork(Algorithm):
             outputs.append(output)
         model_outputs = torch.cat(outputs, dim=1)  # [N, B, D]
         return model_outputs, torch.cat(targets, -1).view(-1)
+
+
+    def _predict_dataset_adv(self, testset, num_particles=None, epoch=0):
+        """
+        Computes predictions for an input dataset oin adversarial examples.
+
+        Args: 
+            testset (iterable): dataset for which to get predictions
+            predictor_size (int): optional parameter indicating how many 
+                predictors are used in an ensemble. Useful for nonstandard
+                implementations.
+        Returns:
+            model_outputs (torch.tensor): a tensor of shape [N, S, D] where
+            N refers to the number of predictors, S is the number of data
+            points, and D is the output dimensionality. 
+        """
+        if hasattr(testset.dataset, 'dataset'):
+            cls = len(testset.dataset.dataset.classes)
+        else:
+            cls = len(testset.dataset.classes)
+        if num_particles is None:
+            num_particles = self._num_particles
+        # sample initial parameters
+        params = self.sample_parameters(num_particles=num_particles)
+        torch.save(params, 'training_params_epoch{}.pt'.format(epoch))
+        # get mnist models for parameters
+        models = [self._get_mnist_model() for _ in range(1)]#num_particles)]
+        models = self.convert_to_model(models, params)
+        model = self._to_ensemble(models)
+        # convert model to foolbox instance
+        fmodel = foolbox.PyTorchModel(model, bounds=(0,1))#, preprocessing=pp)
+        attack = foolbox.attacks.LinfPGD(steps=40, random_start=True)
+        #epsilons = [0.03]
+        x_adv, x_succ, targets, success = [], [], [], []
+        # generate adversarials on initial parameters
+        succ = 0
+        for batch, (data, target) in enumerate(testset):
+            data = data.to(alf.get_default_device())
+            target = target.to(alf.get_default_device())
+            _, adv, success = attack(fmodel, data, target, epsilons=1.0)
+            succ += sum(success)
+            if isinstance(adv, list): print (success)
+            x_adv.append(torch.as_tensor(adv))
+            targets.append(target.view(-1))
+            x_succ.append(adv[success])
+
+        x_adv = torch.stack(x_adv, dim=0)
+        x_succ = torch.cat(x_succ, dim=0)
+        targets = torch.stack(targets, dim=0)
+        acc_adv = foolbox.accuracy(fmodel,
+                                   x_adv.view(-1, *x_adv.shape[2:]),
+                                   targets.view(-1))
+        logging.info('ensemble adv accuracy: {}'.format(acc_adv))
+        print ('success: {}/{}'.format(succ, len(targets.view(-1))))
+        # resample and gather predictions
+        correct = 0
+        for batch, (adv, target) in enumerate(zip(x_adv, targets)):
+            adv = adv.to(alf.get_default_device())
+            params = self.sample_parameters(num_particles=num_particles)
+            self._param_net.set_parameters(params)
+            output, _ = self._param_net(adv)
+            if output.dim() == 2:
+                output = output.unsqueeze(1)
+            output = output.transpose(0, 1)
+            preds = output.mean(0).argmax(-1).cpu()
+            correct += preds.eq(target.cpu().view_as(preds)).float().cpu().sum()
+        logging.info('ensemble resample adv accuracy: {}'.format(
+            correct/(targets.shape[0]*targets.shape[1])))
+        
+        x_adv = 0
+        outputs = []
+        adv_data = torch.utils.data.TensorDataset(x_succ, torch.zeros_like(x_succ))
+        adv_loader = torch.utils.data.DataLoader(adv_data, batch_size=50)
+        for batch, (adv, _) in enumerate(adv_loader):
+            adv = adv.to(alf.get_default_device())
+            params = self.sample_parameters(num_particles=num_particles)
+            self._param_net.set_parameters(params)
+            output, _ = self._param_net(adv)
+            output = output.transpose(0, 1)
+            outputs.append(output)
+         
+        adv_outputs = torch.cat(outputs, dim=1)  # [N, B, D]
+        return adv_outputs, targets.view(-1)
 
     def summarize_train(self, loss_info, params, cum_loss=None, avg_acc=None,
                         auroc=None):
