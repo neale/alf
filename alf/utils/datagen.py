@@ -20,7 +20,6 @@ import torch
 import torchvision
 from torchvision import datasets, transforms
 
-
 class TestDataSet(torch.utils.data.Dataset):
     def __init__(self, input_dim=3, output_dim=1, size=1000, weight=None):
         self._features = torch.randn(size, input_dim)
@@ -62,6 +61,158 @@ def load_test(train_bs=50, test_bs=10, num_workers=0):
     return train_loader, test_loader
 
 
+class TestNClassDataSet(torch.utils.data.Dataset):
+    def __init__(self, num_classes=2, size=200):
+        self.num_classes = num_classes
+        if num_classes == 4:
+            means = [(2., 2.), (-2., 2.), (2., -2.), (-2., -2.)]
+        else:
+            means = [(2., 2.), (-2., -2.)]
+        data = torch.zeros(size, 2)
+        labels = torch.zeros(size)
+        size = size//len(means)
+        for i, (x, y) in enumerate(means):
+            dist = torch.distributions.Normal(torch.tensor([x, y]), .3)
+            samples = dist.sample([size])
+            data[size*i:size*(i+1)] = samples
+            labels[size*i:size*(i+1)] = torch.ones(len(samples)) * i
+    
+        self._features = data
+        self._labels = labels.long()
+
+    def __getitem__(self, index):
+        return self._features[index], self._labels[index]
+
+    def __len__(self):
+        return len(self._features)
+    
+    def get_features(self):
+        return self._features
+
+    def get_targets(self):
+        return self._labels
+    
+
+def load_nclass_test(num_classes,
+                     train_size,
+                     test_size,
+                     train_bs=100, 
+                     test_bs=100,
+                     num_workers=0):
+    trainset = TestNClassDataSet(num_classes, size=train_size)
+    testset = TestNClassDataSet(num_classes, size=test_size)
+    train_loader = torch.utils.data.DataLoader(
+        trainset, batch_size=train_bs, shuffle=True, num_workers=num_workers)
+    test_loader = torch.utils.data.DataLoader(
+        testset, batch_size=test_bs, shuffle=True, num_workers=num_workers)
+    
+    return train_loader, test_loader
+
+
+def get_classes(target, labels):
+    """ select only given classes from target dataset """
+    label_indices = []
+    for i in range(len(target)):
+        if target[i][1] in labels:
+            label_indices.append(i)
+    return label_indices
+
+
+def load_mnist_inlier(train_bs=100, test_bs=100, num_workers=0):
+    """ load a subset of the MNIST dataset. For OOD experiments the 
+        standard is a 6-4 inlier-outlier split. This function only 
+        loads the inlier portion of the split
+    """
+    torch.cuda.manual_seed(1)
+    kwargs = {
+        'num_workers': num_workers,
+        'pin_memory': False,
+        'drop_last': False
+    }
+    path = 'data_m/'
+    
+    label_idx = [0, 1, 2, 3, 4, 5]
+
+    trainset = datasets.MNIST(
+        path,
+        train=True,
+        download=True,
+        transform=transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize((0.1307, ), (0.3081, ))]))
+    
+    trainset = torch.utils.data.Subset(trainset, get_classes(
+        trainset, label_idx))
+    train_loader = torch.utils.data.DataLoader(
+        trainset,
+        batch_size=train_bs,
+        shuffle=True,
+        **kwargs)
+
+    testset = datasets.MNIST(
+        path,
+        train=False,
+        transform=transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize((0.1307, ), (0.3081, ))]))
+
+    testset = torch.utils.data.Subset(testset, get_classes(
+        testset, label_idx))
+    test_loader = torch.utils.data.DataLoader(
+        testset,
+        batch_size=test_bs,
+        shuffle=False,
+        **kwargs)
+    return train_loader, test_loader
+
+
+def load_mnist_outlier(train_bs=100, test_bs=100, num_workers=0):
+    """ load the outlier subset of the MNIST dataset. This function 
+        only loads the outlier portion of the split
+    """
+    torch.cuda.manual_seed(1)
+    kwargs = {
+        'num_workers': num_workers,
+        'pin_memory': False,
+        'drop_last': False
+    }
+    path = 'data_m/'
+    
+    label_idx = [6, 7, 8, 9]
+
+    trainset = datasets.MNIST(
+        path,
+        train=True,
+        download=True,
+        transform=transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize((0.1307, ), (0.3081, ))]))
+    
+    trainset = torch.utils.data.Subset(trainset, get_classes(
+        trainset, label_idx))
+    train_loader = torch.utils.data.DataLoader(
+        trainset,
+        batch_size=train_bs,
+        shuffle=True,
+        **kwargs)
+
+    testset = datasets.MNIST(
+        path,
+        train=False,
+        transform=transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize((0.1307, ), (0.3081, ))]))
+
+    testset = torch.utils.data.Subset(testset, get_classes(
+        testset, label_idx))
+    test_loader = torch.utils.data.DataLoader(
+        testset,
+        batch_size=test_bs,
+        shuffle=False,
+        **kwargs)
+    return train_loader, test_loader
+
+
 def load_mnist(train_bs=100, test_bs=100, num_workers=0):
     kwargs = {
         'num_workers': num_workers,
@@ -95,41 +246,9 @@ def load_mnist(train_bs=100, test_bs=100, num_workers=0):
     return train_loader, test_loader
 
 
-def load_notmnist(train_bs=100, test_bs=100, num_workers=0):
-    kwargs = {
-        'num_workers': num_workers,
-        'pin_memory': False,
-        'drop_last': False
-    }
-    path = 'data_nm/'
-    train_loader = torch.utils.data.DataLoader(
-        datasets.MNIST(
-            path,
-            train=True,
-            transform=transforms.Compose([
-                transforms.ToTensor(),
-                transforms.Normalize((0.1307, ), (0.3081, ))
-            ])),
-        batch_size=train_bs,
-        shuffle=True,
-        **kwargs)
-    test_loader = torch.utils.data.DataLoader(
-        datasets.MNIST(
-            path,
-            train=False,
-            transform=transforms.Compose([
-                transforms.ToTensor(),
-                transforms.Normalize((0.1307, ), (0.3081, ))
-            ])),
-        batch_size=test_bs,
-        shuffle=False,
-        **kwargs)
-    return train_loader, test_loader
-
-
 def load_cifar(train_bs=32, test_bs=100):
-    path = 'data_c/'
-    kwargs = {'num_workers': 1, 'pin_memory': False, 'drop_last': True}
+    path = 'data_c10/'
+    kwargs = {'num_workers': 0, 'pin_memory': False, 'drop_last': True}
     transform_train = transforms.Compose([
         transforms.ToTensor(),
         transforms.Normalize((0.4914, 0.4822, 0.4465),
@@ -151,37 +270,101 @@ def load_cifar(train_bs=32, test_bs=100):
     return trainloader, testloader
 
 
-def load_cifar_hidden(train_bs=32, test_bs=100, c_idx=[0, 1, 2, 3, 4]):
-    path = './data_c'
-    kwargs = {'num_workers': 2, 'pin_memory': False, 'drop_last': True}
-    transform_train = transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Normalize((0.4914, 0.4822, 0.4465),
-                             (0.2023, 0.1994, 0.2010)),
-    ])
-    transform_test = transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Normalize((0.4914, 0.4822, 0.4465),
-                             (0.2023, 0.1994, 0.2010)),
-    ])
+def load_cifar_inlier(train_bs=100, test_bs=100, num_workers=0):
+    """ load a subset of the MNIST dataset. For OOD experiments the 
+        standard is a 6-4 inlier-outlier split. This function only 
+        loads the inlier portion of the split
+    """
+    torch.cuda.manual_seed(1)
+    kwargs = {
+        'num_workers': num_workers,
+        'pin_memory': False,
+        'drop_last': False
+    }
+    path = 'data_c10/'
+    
+    label_idx = [0, 1, 2, 3, 4, 5]
 
-    def get_classes(target, labels):
-        label_indices = []
-        for i in range(len(target)):
-            if target[i][1] in labels:
-                label_indices.append(i)
-        return label_indices
+    trainset = datasets.CIFAR10(
+        path,
+        train=True,
+        download=True,
+        transform=transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize((0.4914, 0.4822, 0.4465),
+                                 (0.2023, 0.1994, 0.2010))]))
+    
+    trainset = torch.utils.data.Subset(trainset, get_classes(
+        trainset, label_idx))
+    train_loader = torch.utils.data.DataLoader(
+        trainset,
+        batch_size=train_bs,
+        shuffle=True,
+        **kwargs)
 
-    trainset = torchvision.datasets.CIFAR10(
-        root=path, train=True, download=False, transform=transform_train)
-    train_hidden = torch.utils.data.Subset(trainset,
-                                           get_classes(trainset, c_idx))
-    trainloader = torch.utils.data.DataLoader(
-        train_hidden, batch_size=train_bs, shuffle=True, **kwargs)
+    testset = datasets.CIFAR10(
+        path,
+        train=False,
+        transform=transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize((0.4914, 0.4822, 0.4465),
+                                 (0.2023, 0.1994, 0.2010))]))
 
-    testset = torchvision.datasets.CIFAR10(
-        root=path, train=False, download=False, transform=transform_test)
-    test_hidden = torch.utils.data.Subset(testset, get_classes(testset, c_idx))
-    testloader = torch.utils.data.DataLoader(
-        test_hidden, batch_size=test_bs, shuffle=False, **kwargs)
-    return trainloader, testloader
+    testset = torch.utils.data.Subset(testset, get_classes(
+        testset, label_idx))
+    test_loader = torch.utils.data.DataLoader(
+        testset,
+        batch_size=test_bs,
+        shuffle=False,
+        **kwargs)
+    return train_loader, test_loader
+
+
+def load_cifar_outlier(train_bs=100, test_bs=100, num_workers=0):
+    """ load a subset of the MNIST dataset. For OOD experiments the 
+        standard is a 6-4 inlier-outlier split. This function only 
+        loads the inlier portion of the split
+    """
+    torch.cuda.manual_seed(1)
+    kwargs = {
+        'num_workers': num_workers,
+        'pin_memory': False,
+        'drop_last': False
+    }
+    path = 'data_c10/'
+    
+    label_idx = [6, 7, 8, 9]
+
+    trainset = datasets.CIFAR10(
+        path,
+        train=True,
+        download=True,
+        transform=transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize((0.4914, 0.4822, 0.4465),
+                                 (0.2023, 0.1994, 0.2010))]))
+    
+    trainset = torch.utils.data.Subset(trainset, get_classes(
+        trainset, label_idx))
+    train_loader = torch.utils.data.DataLoader(
+        trainset,
+        batch_size=train_bs,
+        shuffle=True,
+        **kwargs)
+
+    testset = datasets.CIFAR10(
+        path,
+        train=False,
+        transform=transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize((0.4914, 0.4822, 0.4465),
+                                 (0.2023, 0.1994, 0.2010))]))
+
+    testset = torch.utils.data.Subset(testset, get_classes(
+        testset, label_idx))
+    test_loader = torch.utils.data.DataLoader(
+        testset,
+        batch_size=test_bs,
+        shuffle=False,
+        **kwargs)
+    return train_loader, test_loader

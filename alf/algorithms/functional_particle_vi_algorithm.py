@@ -24,7 +24,10 @@ from typing import Callable
 import alf
 from alf.algorithms.algorithm import Algorithm
 from alf.algorithms.config import TrainerConfig
-from alf.algorithms.hypernetwork_algorithm import classification_loss, regression_loss
+from alf.algorithms.hypernetwork_algorithm import classification_loss
+from alf.algorithms.hypernetwork_algorithm import regression_loss
+from alf.algorithms.hypernetwork_algorithm import auc_score
+from alf.algorithms.hypernetwork_algorithm import predict_dataset
 from alf.algorithms.particle_vi_algorithm import ParVIAlgorithm
 from alf.data_structures import AlgStep, LossInfo, namedtuple
 from alf.networks import EncodingNetwork, ParamNetwork
@@ -416,7 +419,8 @@ class FuncParVIAlgorithm(ParVIAlgorithm):
                                         self._param_net.output_spec)
         else:
             # [B] -> [B, N]
-            target = target.unsqueeze(1).expand(*target[:1], num_particles)
+            target = target.unsqueeze(1).expand(*target.shape[:1],
+                                                num_particles)
 
         return self._loss_func(output, target)
 
@@ -484,6 +488,40 @@ class FuncParVIAlgorithm(ParVIAlgorithm):
                                             *target.shape[1:])
         total_loss = regression_loss(output, target)
         return loss, total_loss
+    
+    def eval_uncertainty(self, num_particles=None):
+        """
+        Function to evaluate the metrics uncertainty quantification and
+            calibration
+        AUROC (AUC) evaluates the separability of model predictions with
+            respect to the training data and a prespecified outlier dataset
+        ECE evaluates how well calibrated the model's predictions are. That
+            is, how well does the expected confidence match the accuracy
+        """  
+
+        with torch.no_grad():
+            outputs, labels = predict_dataset(self._test_loader,
+                                              self._param_net)
+            outputs_outlier, _ = predict_dataset(self._outlier_test,
+                                                 self._param_net)
+        mean_outputs = outputs.mean(0)
+        mean_outputs_outlier = outputs_outlier.mean(0)
+
+        probs = F.softmax(mean_outputs, -1)
+        probs_outlier = F.softmax(mean_outputs_outlier, -1)
+        
+        entropy = entropy_fn(probs.T.cpu().detach().numpy())
+        entropy_outlier = entropy_fn(probs_outlier.T.cpu().detach().numpy())
+        
+        variance = F.softmax(outputs, -1).var(0)
+        variance_outlier = F.softmax(outputs_outlier, -1).var(0)
+
+        auroc_entropy = auc_score(entropy, entropy_outlier)
+        auroc_variance = auc_score(variance, variance_outlier)
+        logging.info("AUROC score (entropy): {}".format(auroc_entropy))
+        logging.info("AUROC score (variance): {}".format(auroc_variance))
+        alf.summary.scalar(name='eval/auroc_entropy', data=auroc_entropy)
+        alf.summary.scalar(name='eval/auroc_variance', data=auroc_variance)
 
     def summarize_train(self, loss_info, params, cum_loss=None, avg_acc=None):
         """Generate summaries for training & loss info after each gradient update.

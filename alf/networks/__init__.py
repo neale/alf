@@ -23,6 +23,7 @@ from .network import Network, NaiveParallelNetwork
 from .networks import *
 from .ou_process import OUProcess
 from .param_networks import *
+from .pinverse_network import PinverseNetwork
 from .preprocessor_networks import PreprocessorNetwork
 from .projection_networks import *
 from .relu_mlp import ReluMLP
