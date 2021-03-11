@@ -59,7 +59,7 @@ def regression_loss(output, target):
     return LossInfo(loss=loss, extra=())
 
 
-@gin.configurable
+@alf.configurable
 class HyperNetwork(Algorithm):
     """HyperNetwork 
 
@@ -113,8 +113,6 @@ class HyperNetwork(Algorithm):
                  name="HyperNetwork"):
         """
         Args:
-            Args for the generated parametric network
-            ====================================================================
             input_tensor_spec (nested TensorSpec): the (nested) tensor spec of
                 the input. If nested, then ``preprocessing_combiner`` must not be
                 None.
@@ -137,21 +135,15 @@ class HyperNetwork(Algorithm):
                 ``last_layer_param`` is not None, ``last_activation`` has to be
                 specified explicitly.
 
-            Args for the generator
-            ====================================================================
             noise_dim (int): dimension of noise
             hidden_layers (tuple): size of hidden layers.
             use_fc_bn (bool): whether use batnch normalization for fc layers.
             num_particles (int): number of sampling particles
             entropy_regularization (float): weight of entropy regularization
 
-            Args for the critic (used when par_vi is ``minmax``)
-            ====================================================================
             critic_optimizer (torch.optim.Optimizer): the optimizer for training critic.
             critic_hidden_layers (tuple): sizes of critic hidden layeres. 
 
-            Args for function_vi
-            ====================================================================
             function_vi (bool): whether to use funciton value based par_vi, current
                 supported by [``svgd2``, ``svgd3``, ``gfsf``].
             function_bs (int): mini batch size for par_vi training. 
@@ -163,31 +155,30 @@ class HyperNetwork(Algorithm):
             function_extra_bs_std (float): std of the normal distribution for
                 sampling extra training batch when using normal sampler.
 
-            Args for training and testing
-            ====================================================================
             loss_type (str): loglikelihood type for the generated functions,
                 types are [``classification``, ``regression``]
             voting (str): types of voting results from sampled functions,
                 types are [``soft``, ``hard``]
             par_vi (str): types of particle-based methods for variational inference,
                 types are [``svgd``, ``svgd2``, ``svgd3``, ``gfsf``, ``minmax``],
+
                 * svgd: empirical expectation of SVGD is evaluated by a single 
-                    resampled particle. The main benefit of this choice is it 
-                    supports conditional case, while all other options do not.
+                  resampled particle. The main benefit of this choice is it 
+                  supports conditional case, while all other options do not.
                 * svgd2: empirical expectation of SVGD is evaluated by splitting
-                    half of the sampled batch. It is a trade-off between 
-                    computational efficiency and convergence speed.
+                  half of the sampled batch. It is a trade-off between 
+                  computational efficiency and convergence speed.
                 * svgd3: empirical expectation of SVGD is evaluated by 
-                    resampled particles of the same batch size. It has better
-                    convergence but involves resampling, so less efficient
-                    computaionally comparing with svgd2.
+                  resampled particles of the same batch size. It has better
+                  convergence but involves resampling, so less efficient
+                  computaionally comparing with svgd2.
                 * gfsf: wasserstein gradient flow with smoothed functions. It 
-                    involves a kernel matrix inversion, so computationally most
-                    expensive, but in some case the convergence seems faster 
-                    than svgd approaches.
+                  involves a kernel matrix inversion, so computationally most
+                  expensive, but in some case the convergence seems faster 
+                  than svgd approaches.
                 * minmax: Fisher Neural Sampler, optimal descent direction of
-                    the Stein discrepancy is solved by an inner optimization
-                    procedure in the space of L2 neural networks.
+                  the Stein discrepancy is solved by an inner optimization
+                  procedure in the space of L2 neural networks.
             optimizer (torch.optim.Optimizer): The optimizer for training generator.
             logging_network (bool): whether logging the archetectures of networks.
             logging_training (bool): whether logging loss and acc during training.
@@ -312,7 +303,7 @@ class HyperNetwork(Algorithm):
             training (bool): whether or not training self._generator
 
         Returns:
-            AlgStep.output from predict_step of self._generator
+            ``AlgStep.output`` from ``predict_step`` of ``self._generator``
         """
         if noise is None and num_particles is None:
             num_particles = self.num_particles
@@ -332,7 +323,10 @@ class HyperNetwork(Algorithm):
             state: not used.
 
         Returns:
-            AlgStep: outputs with shape (batch_size, self._param_net._output_spec.shape[0])
+            AlgStep: 
+            - output (Tensor): shape is 
+                ``[batch_size, self._param_net._output_spec.shape[0]]``
+            - state: not used
         """
         if params is None:
             params = self.sample_parameters(num_particles=num_particles)
@@ -393,9 +387,7 @@ class HyperNetwork(Algorithm):
             state: not used
 
         Returns:
-            AlgStep:
-                outputs: Tensor with shape (batch_size, dim)
-                info: LossInfo
+            ``train_step`` of ``self._generator``
         """
         if num_particles is None:
             num_particles = self._num_particles
@@ -427,18 +419,18 @@ class HyperNetwork(Algorithm):
         evaluated on the training batch. Used when function_vi is True.
 
         Args:
-            data (torch.Tensor): training batch input.
+            data (Tensor): training batch input.
             params: tensor params or tuple of tensors (params, extra_samples)
                 - params: of shape ``[D]`` or ``[B, D]``, sampled outputs 
                     from the generator
                 - extra_samples: sampled extra data
 
         Returns:
-            outputs (torch.Tensor): outputs of param_net under params
+            outputs (Tensor): outputs of param_net under params
                 evaluated on data.
-            density_outputs (torch.Tensor): outputs of param_net under
+            density_outputs (Tensor): outputs of param_net under
                 params evaluated on sampled extra data.
-            extra_samples (torch.Tensor): sampled extra data.
+            extra_samples (Tensor): sampled extra data.
         """
         # sample extra data
         if isinstance(params, tuple):
@@ -473,8 +465,8 @@ class HyperNetwork(Algorithm):
         Used when function_vi is True.
 
         Args:
-            targets (torch.Tensor): target values of the training batch.
-            outputs (torch.Tensor): function outputs to evaluate the loss.
+            targets (Tensor): target values of the training batch.
+            outputs (Tensor): function outputs to evaluate the loss.
 
         Returns:
             negative log_prob for outputs evaluated on current training batch.
@@ -490,8 +482,8 @@ class HyperNetwork(Algorithm):
         Used when function_vi is False.
 
         Args:
-            inputs (torch.Tensor): (data, target) of training batch.
-            params (torch.Tensor): generator outputs to evaluate the loss.
+            inputs (Tensor): (data, target) of training batch.
+            params (Tensor): generator outputs to evaluate the loss.
 
         Returns:
             negative log_prob for params evaluated on current training batch.

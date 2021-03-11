@@ -15,6 +15,7 @@
 
 import copy
 
+from functools import partial
 import numpy as np
 import torch
 import torch.nn as nn
@@ -435,6 +436,7 @@ class FC(nn.Module):
         return ParallelFC(n=n, **self._kwargs)
 
 
+@alf.configurable
 class FCBatchEnsemble(FC):
     r"""The BatchEnsemble for FC layer.
 
@@ -461,7 +463,8 @@ class FCBatchEnsemble(FC):
                  use_ln=False,
                  kernel_initializer=None,
                  kernel_init_gain=1.0,
-                 bias_init_range=0.):
+                 bias_init_range=0.,
+                 ensemble_group=0):
         """
         Args:
             input_size (int): input size
@@ -482,12 +485,34 @@ class FCBatchEnsemble(FC):
                 ``kernel_initializer`` is not None.
             bias_init_range (float): biases are initialized uniformly in
                 [-bias_init_range, bias_init_range]
+            ensemble_group (int): the extra attribute ``ensemble_group`` added 
+                to ``self._r``, ``self._s``, and ``self._ensemble_bias``, 
+                default value is 0. 
+                For alf.optimizers whose ``parvi`` is not ``None``, all parameters 
+                with the same ``ensemble_group`` will be updated by the 
+                particle-based VI algorithm specified by ``parvi``, options are
+                [``svgd``, ``gfsf``],
+
+                * Stein Variational Gradient Descent (SVGD)
+
+                  Liu, Qiang, and Dilin Wang. "Stein Variational Gradient Descent: 
+                  A General Purpose Bayesian Inference Algorithm." NIPS. 2016.
+
+                * Wasserstein Gradient Flow with Smoothed Functions (GFSF)
+                
+                  Liu, Chang, et al. "Understanding and accelerating particle-based
+                  variational inference." ICML, 2019.
         """
         nn.Module.__init__(self)
         self._r = nn.Parameter(torch.Tensor(ensemble_size, input_size))
         self._s = nn.Parameter(torch.Tensor(ensemble_size, output_size))
+        assert isinstance(ensemble_group,
+                          int), ("ensemble_group has to be an integer!")
         self._ensemble_bias = nn.Parameter(
             torch.Tensor(ensemble_size, output_size))
+        self._r.ensemble_group = ensemble_group
+        self._s.ensemble_group = ensemble_group
+        self._ensemble_bias.ensemble_group = ensemble_group
         self._use_ensemble_bias = use_bias
         self._ensemble_size = ensemble_size
         self._output_ensemble_ids = output_ensemble_ids
@@ -703,6 +728,139 @@ class ParallelFC(nn.Module):
                 the same ``input_size`` and ``output_size``
         """
         return self._bias
+
+
+@alf.configurable
+class CausalConv1D(nn.Module):
+    """1D (Dilated) Causal Convolution layer.
+        1D Dilated Causal Convolution is proposed in `Aaron et. al. WaveNet:
+        A generative model for raw audio <https://arxiv.org/abs/1609.03499>`_
+    """
+
+    def __init__(self,
+                 in_channels,
+                 out_channels,
+                 kernel_size,
+                 dilation=1,
+                 hide_current=False,
+                 activation=torch.relu_,
+                 use_bias=None,
+                 use_bn=False,
+                 kernel_initializer=None,
+                 kernel_init_gain=1.0,
+                 bias_init_value=0.0):
+        """A layer implementing the 1D (Dilated) Causal Convolution.
+        It is also responsible for activation and customized weights
+        initialization. An auto gain calculation might depend on the activation
+        following the causal conv1d layer.
+
+        Note that the main difference of causal conv v.s. standard conv is that
+        each temporal element in the convolutional output is causal w.r.t.
+        the temporal elements from input. For example, for a length ``L``
+        sequence ``x`` with the shape of ``[B, C, L]``, and
+        ``y = causal_conv(x)``, where the shape of ``y`` is
+        ``[B, C', L]``, by causal we mean ``y[..., l]`` only depends on
+        ``X[..., :l]`` (i.e. the past), and there is no dependency on
+        ``X[..., l:]`` (i.e. future) as in the standard non-causal
+        convolution.
+
+        This can implemented by using an asymmetric padding, which in effect
+        shift the input to the right (future) according to kernel size.
+
+        Args:
+            in_channels (int): channels of the input
+            out_channels (int): channels of the output
+            kernel_size (int): size of the kernel
+            dilation (int): controls the spacing between the kernel points.
+                Please refer to here for a visual illustration:
+                https://github.com/vdumoulin/conv_arithmetic/blob/master/README.md
+            hide_current (bool): whether to hide the current by shifting the
+                input to the right (future) by one. This is typically needed
+                in the first layer of a causal conv net.
+            activation (torch.nn.functional): activation to be applied to output
+            use_bias (bool|None): whether use bias. If None, will use ``not use_bn``
+            use_bn (bool): whether use batch normalization
+            kernel_initializer (Callable): initializer for the conv layer kernel.
+                If None is provided a variance_scaling_initializer with gain as
+                ``kernel_init_gain`` will be used.
+            kernel_init_gain (float): a scaling factor (gain) applied to the
+                std of kernel init distribution. It will be ignored if
+                ``kernel_initializer`` is not None.
+            bias_init_value (float): a constant
+        """
+        super(CausalConv1D, self).__init__()
+        if use_bias is None:
+            use_bias = not use_bn
+        self._activation = activation
+
+        # use F.pad for asymmetric padding
+        if hide_current:
+            assert dilation == 1, "the dilation should be 1 for hiding current"
+            asymmetric_padding = (kernel_size, -1)
+        else:
+            asymmetric_padding = ((kernel_size - 1) * dilation, 0)
+
+        self._pad = partial(
+            F.pad, pad=asymmetric_padding, mode='constant', value=0)
+        self._causal_conv1d = nn.Conv1d(
+            in_channels,
+            out_channels,
+            kernel_size,
+            stride=1,
+            padding=0,
+            dilation=dilation,
+            bias=use_bias)
+
+        self._kernel_initializer = kernel_initializer
+        self._kernel_init_gain = kernel_init_gain
+        self._bias_init_value = bias_init_value
+        self._use_bias = use_bias
+        if use_bn:
+            self._bn = nn.BatchNorm1d(out_channels)
+        else:
+            self._bn = None
+
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        """Initialize the parameters."""
+        if self._kernel_initializer is None:
+            variance_scaling_init(
+                self._causal_conv1d.weight.data,
+                gain=self._kernel_init_gain,
+                nonlinearity=self._activation)
+        else:
+            self._kernel_initializer(self._causal_conv1d.weight.data)
+        if self._use_bias:
+            nn.init.constant_(self._causal_conv1d.bias.data,
+                              self._bias_init_value)
+        if self._bn is not None:
+            self._bn.reset_parameters()
+
+    def forward(self, x):
+        """
+        Args:
+            x (tensor): input of the shape [B, C, L] where B is the batch size,
+                C denotes the number of input channels, and L is the length of
+                the signal.
+
+        Returns:
+            A tensor of the shape [B, C', L], where C' denotes the number of
+                output channels.
+        """
+
+        y = self._causal_conv1d(self._pad(x))
+        if self._bn is not None:
+            y = self._bn(y)
+        return self._activation(y)
+
+    @property
+    def weight(self):
+        return self._causal_conv1d.weight
+
+    @property
+    def bias(self):
+        return self._causal_conv1d.bias
 
 
 @alf.configurable
@@ -2112,3 +2270,77 @@ def reset_parameters(module):
         if len(list(module.parameters())) > 0:
             raise ValueError(
                 "Cannot reset_parameter for layer type %s." % type(module))
+
+
+class Detach(nn.Module):
+    """Detach nested Tensors."""
+
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, input):
+        return common.detach(input)
+
+
+class Branch(nn.Module):
+    """Apply multiple modules on the same input.
+
+    Example:
+
+    .. code-block:: python
+
+        net = Branch((module1, module2))
+        y = net(x)
+
+    is equivalent to the following:
+
+    .. code-block:: python
+
+        y = module1(x), module2(x)
+
+    """
+
+    def __init__(self, modules):
+        """
+        Args:
+            modules (nested nn.Module): a nest of ``torch.nn.Module``
+        """
+        super().__init__()
+        has_network = any(
+            alf.nest.flatten(
+                alf.nest.map_structure(
+                    lambda m: isinstance(m, alf.networks.Network), modules)))
+        assert not has_network, (
+            "modules should not contain alf.networks.Network. "
+            "Try alf.networks.Branch instead.")
+
+        self._networks = modules
+        if alf.nest.is_nested(modules):
+            # make it a nn.Module so its parameters can be picked up by the framework
+            self._nets = alf.nest.utils.make_nested_module(modules)
+
+    def forward(self, inputs):
+        return alf.nest.map_structure(lambda net: net(inputs), self._networks)
+
+    def reset_parameters(self):
+        alf.nest.map_structure(reset_parameters, self._networks)
+
+
+class Sequential(nn.Sequential):
+    """A thin wrapper over nn.Sequential to allow stateless alf.networks.Network."""
+
+    def __init__(self, *args):
+        super().__init__(*args)
+        for m in self:
+            if isinstance(m, alf.networks.Network):
+                assert not alf.nest.flatten(m.state_spec), (
+                    "Network element of layers.Sequential should be stateless. "
+                    "Use networks.Sequential instead")
+
+    def forward(self, input):
+        for module in self:
+            if isinstance(module, alf.networks.Network):
+                input = module(input)[0]
+            else:
+                input = module(input)
+        return input

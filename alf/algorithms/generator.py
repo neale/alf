@@ -31,7 +31,7 @@ GeneratorLossInfo = namedtuple("GeneratorLossInfo",
                                ["generator", "mi_estimator"])
 
 
-@gin.configurable
+@alf.configurable
 class CriticAlgorithm(Algorithm):
     """
     Wrap a critic network as an Algorithm for flexible gradient updates
@@ -98,13 +98,13 @@ class CriticAlgorithm(Algorithm):
         """Predict for one step of inputs.
 
         Args:
-            inputs (torch.Tensor): inputs for prediction.
+            inputs (Tensor): inputs for prediction.
             state: not used.
             requires_jac_trace (bool): whether outputs diagonals of Jacobian.
 
         Returns:
             AlgStep:
-            - output (torch.Tensor): predictions or (predictions, diag_jacobian)
+            - output (Tensor): predictions or (predictions, diag_jacobian)
                 if requires_jac_diag is True.
             - state: not used.
         """
@@ -116,7 +116,7 @@ class CriticAlgorithm(Algorithm):
         return AlgStep(output=outputs, state=(), info=())
 
 
-@gin.configurable
+@alf.configurable
 class Generator(Algorithm):
     r"""Generator
 
@@ -365,7 +365,9 @@ class Generator(Algorithm):
             state: not used
 
         Returns:
-            AlgorithmStep: outputs with shape (batch_size, output_dim)
+            AlgStep:
+            - output (Tensor): predictions with shape ``[batch_size, output_dim]``
+            - state: not used.
         """
         outputs, _ = self._predict(
             inputs=inputs,
@@ -428,9 +430,9 @@ class Generator(Algorithm):
             state: not used
 
         Returns:
-            AlgorithmStep:
-                outputs: Tensor with shape (batch_size, dim)
-                info: LossInfo
+            AlgStep:
+            - output (Tensor): predictions with shape ``[batch_size, output_dim]``
+            - info (LossInfo): loss
         """
         outputs, gen_inputs = self._predict(inputs, batch_size=batch_size)
         if entropy_regularization is None:
@@ -478,7 +480,7 @@ class Generator(Algorithm):
         return self._kernel_width_averager.get()
 
     def _rbf_func(self, x, y):
-        """Compute RGF kernel, used by svgd_grad. """
+        """Compute RBF kernel, used by svgd_grad. """
         d = (x - y)**2
         d = torch.sum(d, -1)
         h = self._kernel_width(d)
@@ -541,7 +543,8 @@ class Generator(Algorithm):
 
         kappa = torch.exp(-dist_sq / h)  # [N, N]
         kappa_inv = torch.inverse(kappa + alpha * torch.eye(N))  # [N, N]
-        kappa_grad = torch.einsum('ij,ijk->jk', kappa, -2 * diff / h)  # [N, D]
+        kappa_grad = -2 * kappa.unsqueeze(-1) * diff / h  # [N, N, D]
+        kappa_grad = kappa_grad.sum(0)  # [N, D]
 
         return -kappa_inv @ kappa_grad
 

@@ -17,6 +17,7 @@ import gin
 import numpy as np
 import torch
 
+import alf
 from alf.algorithms.algorithm import Algorithm
 from alf.algorithms.mi_estimator import MIEstimator
 from alf.data_structures import AlgStep, LossInfo, namedtuple
@@ -27,7 +28,7 @@ from alf.utils import common, math_ops
 from alf.utils.averager import AdaptiveAverager
 
 
-@gin.configurable
+@alf.configurable
 class ParVIAlgorithm(Algorithm):
     """ParVIAlgorithm
 
@@ -37,13 +38,13 @@ class ParVIAlgorithm(Algorithm):
 
         1. Stein Variational Gradient Descent (SVGD):
 
-        Feng et al "Learning to Draw Samples with Amortized Stein Variational
-        Gradient Descent" https://arxiv.org/pdf/1707.06626.pdf
+           Liu, Qiang, and Dilin Wang. "Stein Variational Gradient Descent: 
+           A General Purpose Bayesian Inference Algorithm." NIPS. 2016.
 
         2. Wasserstein Particle-based VI with Smooth Functions (GFSF):
 
-        Liu, Chang, et al. "Understanding and accelerating particle-based 
-        variational inference." International Conference on Machine Learning. 2019.
+           Liu, Chang, et al. "Understanding and accelerating particle-based 
+           variational inference." International Conference on Machine Learning. 2019.
     """
 
     def __init__(self,
@@ -60,13 +61,14 @@ class ParVIAlgorithm(Algorithm):
             particle_dim (int): dimension of the particles.
             num_particles (int): number of particles.
             entropy_regularization (float): weight of the repulsive term in par_vi. 
-            par_vi (string): par_vi methods, options are [``svgd``, ``gfsf``],
+            par_vi (string): par_vi methods, options are [``svgd``, ``gfsf``, ``None``],
+
                 * svgd: empirical expectation of SVGD is evaluated by reusing
-                    the same batch of particles.   
+                  the same batch of particles.   
                 * gfsf: wasserstein gradient flow with smoothed functions. It 
-                    involves a kernel matrix inversion, so computationally more
-                    expensive, but in some cases the convergence seems faster 
-                    than svgd approaches.
+                  involves a kernel matrix inversion, so computationally more
+                  expensive, but in some cases the convergence seems faster 
+                  than svgd approaches.
             optimizer (torch.optim.Optimizer): (optional) optimizer for training
             name (str): name of this generator
         """
@@ -107,7 +109,9 @@ class ParVIAlgorithm(Algorithm):
             state: not used
 
         Returns:
-            AlgorithmStep: outputs with shape (num_particles, output_dim)
+            AlgStep: 
+            - output (Tensor): shape is ``[num_particles, output_dim]``
+            - state: not used
         """
         return AlgStep(output=self.particles, state=(), info=())
 
@@ -126,10 +130,11 @@ class ParVIAlgorithm(Algorithm):
                 function value based par_vi, where each particle represents 
                 parameters of a neural network function. It is call by
                 transform_func(particles) which returns the following,
-                - outputs: outputs of network parameterized by particles evaluated
-                    on predifined training batch.
-                - extra_outputs: outputs of network parameterized by particles
-                    evaluated on additional sampled data.
+
+                * outputs: outputs of network parameterized by particles evaluated
+                  on predifined training batch.
+                * extra_outputs: outputs of network parameterized by particles
+                  evaluated on additional sampled data.
             entropy_regularization (float): weight of the repulsive term in par_vi. 
                 If None, use self._entropy_regularization.
             loss_mask (Tensor): mask indicating which samples are valid for loss
@@ -137,9 +142,10 @@ class ParVIAlgorithm(Algorithm):
             state: not used
 
         Returns:
-            AlgorithmStep:
-                outputs: Tensor with shape (num_particles, dim)
-                info: LossInfo
+            AlgStep:
+            - output (Tensor): shape is ``[num_particles, dim]``
+            - state: not used
+            - info (LossInfo): loss
         """
         if entropy_regularization is None:
             entropy_regularization = self._entropy_regularization
@@ -173,8 +179,7 @@ class ParVIAlgorithm(Algorithm):
             x (Tensor): set of N particles, shape (Nx x W), where W is the 
                 dimenseion of each particle
             y (Tensor): set of N particles, shape (Ny x W), where W is the 
-                dimenseion of each particle. If y is None, treat y=x and compute
-                the leave-the-sample-out kernel and gradient of kernel.
+                dimenseion of each particle. If y is None, treat y=x. 
 
         Returns:
             :math:`K(x, y)` (Tensor): the RBF kernel of shape (Nx x Ny)
@@ -182,12 +187,12 @@ class ParVIAlgorithm(Algorithm):
             
         """
         Nx, Dx = x.shape
-        if y is not None:
+        if y is None:
+            y = x
+        else:
             Ny, Dy = y.shape
             assert Dx == Dy
-            diff = x.unsqueeze(1) - y.unsqueeze(0)  # [Nx, Ny, W]
-        else:
-            diff = x.unsqueeze(1) - x.unsqueeze(0)  # [Nx, Nx, W]
+        diff = x.unsqueeze(1) - y.unsqueeze(0)  # [Nx, Ny, W]
         dist_sq = torch.sum(diff**2, -1)  # [Nx, Ny]
         h, _ = torch.median(dist_sq.view(-1), dim=0)
         if h == 0.:
@@ -196,13 +201,7 @@ class ParVIAlgorithm(Algorithm):
             h = h / max(np.log(Nx), 1.)
 
         kappa = torch.exp(-dist_sq / h)  # [Nx, Ny]
-        if y is None:
-            # compute leave-the-sample-out kernel and gradient of kernel
-            mask = torch.eye(Nx).bool()
-            kappa = kappa.masked_fill(mask, 0.)
-
-        kappa_grad = torch.einsum('ij,ijk->ijk', kappa,
-                                  -2 * diff / h)  # [Nx, Ny, W]
+        kappa_grad = -2 * kappa.unsqueeze(-1) * diff / h  # [Nx, Ny, W]
         return kappa, kappa_grad
 
     def _score_func(self, x, alpha=1e-5):
@@ -225,11 +224,15 @@ class ParVIAlgorithm(Algorithm):
         diff = x.unsqueeze(1) - x.unsqueeze(0)  # [N, N, D]
         dist_sq = torch.sum(diff**2, -1)  # [N, N]
         h, _ = torch.median(dist_sq.view(-1), dim=0)
-        h = h / np.log(N)
+        if h == 0.:
+            h = torch.ones_like(h)
+        else:
+            h = h / max(np.log(N), 1.)
 
         kappa = torch.exp(-dist_sq / h)  # [N, N]
         kappa_inv = torch.inverse(kappa + alpha * torch.eye(N))  # [N, N]
-        kappa_grad = torch.einsum('ij,ijk->jk', kappa, -2 * diff / h)  # [N, D]
+        kappa_grad = -2 * kappa.unsqueeze(-1) * diff / h  # [N, N, D]
+        kappa_grad = kappa_grad.sum(0)  # [N, D]
 
         return kappa_inv @ kappa_grad
 
@@ -261,8 +264,7 @@ class ParVIAlgorithm(Algorithm):
                    transform_func=None):
         """
         Compute particle gradients via SVGD, empirical expectation
-        evaluated using the all particles except for the one that the 
-        SVGD gradient is computed for. 
+        evaluated using the all particles. 
         """
         if transform_func is not None:
             particles, extra_particles = transform_func(particles)
@@ -279,16 +281,15 @@ class ParVIAlgorithm(Algorithm):
                                         loss_inputs)[0]  # [N, D]
 
         # [N, N], [N, N, D]
-        kernel_weight, kernel_grad = self._rbf_func(aug_particles.detach(),
-                                                    aug_particles.detach())
+        kernel_weight, kernel_grad = self._rbf_func(aug_particles.detach())
         kernel_logp = torch.matmul(kernel_weight, loss_grad) / (
             self.num_particles)  # [N, D]
 
         loss_prop_kernel_logp = torch.sum(
             kernel_logp.detach() * particles, dim=-1)
         loss_prop_kernel_grad = torch.sum(
-            -entropy_regularization * kernel_grad.mean(0).detach() * \
-                aug_particles,
+            -entropy_regularization * kernel_grad.mean(0).detach() *
+            aug_particles,
             dim=-1)
         loss_propagated = loss_prop_kernel_logp + loss_prop_kernel_grad
 

@@ -40,6 +40,42 @@ from alf.data_structures import namedtuple
 MINIMUM_RENDER_WIDTH = 640
 MINIMUM_RENDER_HEIGHT = 240
 
+MAXIMUM_RENDER_WIDTH = 1280
+MAXIMUM_RENDER_HEIGHT = 640
+
+
+def get_scaled_image_size(height, width):
+    """Compute properly scaled image size.
+
+    The scaled image height and width are calculated based on the minimum and
+    maximum allowed sizes for rendering, while keeping the aspect ratio of the
+    image unchanged.
+    If both the height and width are within the bound, no scaling is applied.
+
+    Returns:
+        tuple:
+        - scaled_height (int): scaled image height
+        - scaled_width (int): scaled image width
+    """
+    min_scaling_factor = max(
+        float(MINIMUM_RENDER_HEIGHT) / height,
+        float(MINIMUM_RENDER_WIDTH) / width)
+
+    max_scaling_factor = min(
+        float(MAXIMUM_RENDER_HEIGHT) / height,
+        float(MAXIMUM_RENDER_WIDTH) / width)
+
+    if min_scaling_factor > 1:
+        scaling_factor = min(min_scaling_factor, max_scaling_factor)
+    elif max_scaling_factor < 1:
+        scaling_factor = max(min_scaling_factor, max_scaling_factor)
+    else:
+        scaling_factor = 1
+
+    scaled_height = int(height * scaling_factor)
+    scaled_width = int(width * scaling_factor)
+    return scaled_height, scaled_width
+
 
 class SensorBase(abc.ABC):
     """Base class for sersors."""
@@ -464,7 +500,7 @@ class RadarSensor(SensorBase):
 
 
 # ==============================================================================
-# -- CameraSensor -------------------------------------------------------------
+# -- CameraSensor --------------------------------------------------------------
 # ==============================================================================
 @alf.configurable
 class CameraSensor(SensorBase):
@@ -566,12 +602,19 @@ class CameraSensor(SensorBase):
             import pygame
             height, width = self._image.shape[1:3]
             image = np.transpose(self._image, (2, 1, 0))
-            if width < MINIMUM_RENDER_WIDTH:
-                height = height * MINIMUM_RENDER_WIDTH // width
+
+            if self._sensor_type.startswith(
+                    'sensor.camera.semantic_segmentation'):
+                image = image * 10  # scale the label map for better viewing
+
+            scaled_height, scaled_width = get_scaled_image_size(height, width)
+
+            if scaled_height != height or scaled_width != width:
                 image = cv2.resize(
                     image,
-                    dsize=(height, MINIMUM_RENDER_WIDTH),
+                    dsize=(scaled_height, scaled_width),
                     interpolation=cv2.INTER_NEAREST)
+
             surface = pygame.surfarray.make_surface(image)
             display.blit(surface, (0, 0))
 
@@ -585,6 +628,15 @@ class CameraSensor(SensorBase):
         array = np.reshape(array, (image.height, image.width, 4))
         array = array[:, :, :3]
         array = array[:, :, ::-1]
+
+        # Need to slice the multi-channel image according to the number of
+        # channels specified in observation_spec.
+        # For raw data from the semantic segmentation camera, the tag information
+        # is encoded in the red channel.
+        # For logarithmic depth from depth camera, the scalar depth is the same
+        # for all three channels and therefore we can do a similar slicing.
+        array = array[:, :, 0:self._observation_spec.shape[0]]
+
         array = np.transpose(array, (2, 0, 1))
         self._image = array.copy()
 
