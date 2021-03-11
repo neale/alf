@@ -17,10 +17,7 @@ import gin
 import numpy as np
 import torch
 
-<<<<<<< HEAD
-=======
 import alf
->>>>>>> PR functional particle_vi algorithm (#751)
 from alf.algorithms.algorithm import Algorithm
 from alf.algorithms.mi_estimator import MIEstimator
 from alf.algorithms.generator import CriticAlgorithm
