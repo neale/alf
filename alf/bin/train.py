@@ -42,7 +42,7 @@ You can visualize playing of the trained model by running:
     --alsologtostderr
 
 If instead of Gin configuration file, you want to use ALF python conf file, then
-replace the "--gin_file" option with "--conf", and "--gin_param" with "--conf_param".
+replace the "--gin_file" option with "--conf".
 """
 
 from absl import app

@@ -54,11 +54,20 @@ class HyperNetworkTest(parameterized.TestCase, alf.test.TestCase):
         self.assertEqual(x.shape, y.shape)
         self.assertGreater(float(torch.min(x - y)), eps)
 
-    @parameterized.parameters(('gfsf'), ('svgd2'), ('svgd3'), ('minmax'),
-                              ('gfsf', True), ('svgd2', True), ('svgd3', True))
+    @parameterized.parameters(
+        ('gfsf', False),
+        ('svgd2', False),
+        ('svgd3', False),
+        ('minmax', False),
+        ('gfsf', True),
+        ('svgd2', True),
+        ('svgd3', True),
+        ('svgd3', False, 'rkhs'),
+    )
     def test_bayesian_linear_regression(self,
                                         par_vi='minmax',
                                         function_vi=False,
+                                        functional_gradient=None,
                                         train_batch_size=10,
                                         num_particles=64):
         r"""
@@ -83,19 +92,24 @@ class HyperNetworkTest(parameterized.TestCase, alf.test.TestCase):
         print("beta: {}".format(beta))
         noise = torch.randn(batch_size, output_dim)
         targets = inputs @ beta + noise
-        true_cov = torch.inverse(
-            inputs.t() @ inputs)  # + torch.eye(input_size))
+        true_cov = torch.inverse(inputs.t() @ inputs)
         true_mean = true_cov @ inputs.t() @ targets
         noise_dim = 3
+        if functional_gradient is not None:
+            hidden_layers = ()
+        else:
+            hidden_layers = None
+
         algorithm = HyperNetwork(
             input_tensor_spec=input_spec,
             last_layer_param=(output_dim, False),
             last_activation=math_ops.identity,
             noise_dim=noise_dim,
-            hidden_layers=None,
+            hidden_layers=hidden_layers,
             loss_type='regression',
             par_vi=par_vi,
             function_vi=function_vi,
+            functional_gradient=functional_gradient,
             function_bs=train_batch_size,
             critic_hidden_layers=(hidden_size, hidden_size),
             optimizer=alf.optimizers.Adam(lr=2e-3),

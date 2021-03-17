@@ -115,3 +115,7 @@ venv.bak/
 
 # .DS_Store
 *.DS_Store
+
+# For dataset stores
+data_m/
+data_c10/

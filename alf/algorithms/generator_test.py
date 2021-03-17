@@ -21,7 +21,7 @@ import torch.nn as nn
 
 import alf
 from alf.algorithms.generator import Generator
-from alf.networks import Network
+from alf.networks import Network, ReluMLP
 from alf.tensor_specs import TensorSpec
 
 
@@ -67,12 +67,22 @@ class GeneratorTest(parameterized.TestCase, alf.test.TestCase):
         dict(entropy_regularization=1.0, par_vi='svgd'),
         dict(entropy_regularization=1.0, par_vi='svgd2'),
         dict(entropy_regularization=1.0, par_vi='svgd3'),
+        dict(entropy_regularization=1.0, par_vi='minmax'),
+        dict(
+            entropy_regularization=1.0,
+            par_vi='svgd',
+            functional_gradient='rkhs'),
+        dict(
+            entropy_regularization=1.0,
+            par_vi='minmax',
+            functional_gradient='minmax'),
         dict(entropy_regularization=0.0),
         dict(entropy_regularization=0.0, mi_weight=1),
     )
     def test_generator_unconditional(self,
                                      entropy_regularization=1.0,
                                      par_vi='minmax',
+                                     functional_gradient=None,
                                      mi_weight=None):
         r"""
         The generator is trained to match (STEIN) / maximize (ML) the likelihood
@@ -84,8 +94,15 @@ class GeneratorTest(parameterized.TestCase, alf.test.TestCase):
                      (entropy_regularization, par_vi, mi_weight))
         dim = 2
         batch_size = 64
-        net = Net(dim)
         hidden_size = 10
+        if functional_gradient is not None:
+            input_dim = TensorSpec((3, ))
+            net = ReluMLP(input_dim, hidden_layers=(), output_size=dim)
+            w = torch.tensor([[1, 2], [-1, 1], [1, 1]], dtype=torch.float32)
+            net._fc_layers[0].weight = nn.Parameter(w.t())
+            critic_relu_mlp = True
+        else:
+            net = Net(dim)
         generator = Generator(
             dim,
             noise_dim=3,
@@ -112,7 +129,11 @@ class GeneratorTest(parameterized.TestCase, alf.test.TestCase):
 
         for i in range(2000):
             _train()
-            learned_var = torch.matmul(net.fc.weight, net.fc.weight.t())
+            if functional_gradient is not None:
+                learned_var = torch.matmul(net._fc_layers[0].weight,
+                                           net._fc_layers[0].weight.t())
+            else:
+                learned_var = torch.matmul(net.fc.weight, net.fc.weight.t())
             if i % 500 == 0:
                 print(i, "learned var=", learned_var)
 
@@ -152,7 +173,7 @@ class GeneratorTest(parameterized.TestCase, alf.test.TestCase):
             mi_weight=mi_weight,
             par_vi=par_vi,
             input_tensor_spec=TensorSpec((dim, )),
-            optimizer=alf.optimizers.Adam(lr=2e-3))
+            optimizer=alf.optimizers.Adam(lr=1e-3))
 
         var = torch.tensor([1, 4], dtype=torch.float32)
         precision = 1. / var
