@@ -41,12 +41,15 @@ import alf.utils.datagen as datagen
 from alf.utils.summary_utils import record_time
 from alf.utils.video_recorder import VideoRecorder
 
+import importlib.util
+
 
 @gin.configurable
 def create_dataset(dataset_name='mnist',
                    dataset_loader=datagen,
                    train_batch_size=100,
-                   test_batch_size=100):
+                   test_batch_size=100,
+                   label_idx=None):
     """Create a pytorch data loaders.
 
     Args:
@@ -55,6 +58,8 @@ def create_dataset(dataset_name='mnist',
             loaders for both training and testing.
         train_batch_size (int): batch_size for training.
         test_batch_size (int): batch_size for testing.
+        label_idx (list[int]): class indices to load, may
+            be None if the whole data set is to be used. 
 
     Returns:
         trainset (torch.utils.data.DataLoaderr):
@@ -63,6 +68,7 @@ def create_dataset(dataset_name='mnist',
 
     trainset, testset = getattr(dataset_loader,
                                 'load_{}'.format(dataset_name))(
+                                    label_idx,
                                     train_bs=train_batch_size,
                                     test_bs=test_batch_size)
     return trainset, testset
@@ -137,6 +143,7 @@ class Trainer(object):
 
         self._evaluate = config.evaluate
         self._eval_interval = config.eval_interval
+        self._eval_uncertainty = config.eval_uncertainty
 
         self._summary_interval = config.summary_interval
         self._summaries_flush_secs = config.summaries_flush_secs
@@ -529,12 +536,28 @@ class SLTrainer(Trainer):
         self._num_epochs = config.num_iterations
         self._trainer_progress.set_termination_criterion(self._num_epochs)
 
-        trainset, testset = self._create_dataset()
+        trainset, testset = self._create_dataset(
+            label_idx=config.train_classes)
+
+        if self._eval_uncertainty:
+            # check for sklearn
+            assert importlib.util.find_spec('sklearn') is not None, "To " \
+                "evaluate model uncertainty, the sklearn package must be " \
+                "installed"
+            outlier_train, outlier_test = create_dataset(
+                dataset_name=config.hold_out_dataset,
+                label_idx=config.hold_out_classes)
+        else:
+            outlier_train = None
+            outlier_test = None
+
         input_tensor_spec = TensorSpec(shape=trainset.dataset[0][0].shape)
-        if hasattr(trainset.dataset, 'classes'):
+        
+        if config.train_classes is None:
             output_dim = len(trainset.dataset.classes)
         else:
-            output_dim = len(trainset.dataset[0][1])
+            output_dim = len(config.train_classes)
+        print (output_dim)
 
         self._algorithm = config.algorithm_ctor(
             input_tensor_spec=input_tensor_spec,
@@ -542,11 +565,14 @@ class SLTrainer(Trainer):
             last_activation=math_ops.identity,
             config=config)
 
-        self._algorithm.set_data_loader(trainset, testset)
+        self._algorithm.set_data_loader(
+            trainset,
+            testset,
+            outlier_data_loaders=(outlier_train, outlier_test))
 
-    def _create_dataset(self):
+    def _create_dataset(self, label_idx):
         """Create data loaders."""
-        return create_dataset()
+        return create_dataset(label_idx=label_idx)
 
     def _train(self):
         begin_epoch_num = int(self._trainer_progress._iter_num)
@@ -562,9 +588,13 @@ class SLTrainer(Trainer):
             logging.info("Epoch: {}".format(epoch_num + 1))
             with record_time("time/train_iter"):
                 self._algorithm.train_iter()
+            
+            if (epoch_num + 1) % self._eval_interval == 0:
+                if self._evaluate:
+                    self._algorithm.evaluate()
 
-            if self._evaluate and (epoch_num + 1) % self._eval_interval == 0:
-                self._algorithm.evaluate()
+                if self._eval_uncertainty:
+                    self._algorithm.eval_uncertainty()
 
             if epoch_num == begin_epoch_num:
                 self._summarize_training_setting()
@@ -576,6 +606,8 @@ class SLTrainer(Trainer):
             if (self._num_epochs and epoch_num >= self._num_epochs):
                 if self._evaluate:
                     self._algorithm.evaluate()
+                if self._eval_uncertainty:
+                    self._algorithm.eval_uncertainty()
                 break
 
             if self._num_epochs and epoch_num >= time_to_checkpoint:

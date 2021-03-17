@@ -668,8 +668,9 @@ class Generator(Algorithm):
         width, _ = torch.median(dist, dim=0)
         width = width / np.log(len(dist))
         self._kernel_width_averager.update(width)
-
         return self._kernel_width_averager.get()
+        #return width
+
 
     def _rbf_func(self, x, y):
         """Compute RGF kernel, used by svgd_grad. """

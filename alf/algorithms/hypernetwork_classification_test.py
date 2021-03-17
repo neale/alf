@@ -29,8 +29,8 @@ from alf.utils.datagen import load_nclass_test
 class HyperNetworkClassificationTest(parameterized.TestCase, alf.test.TestCase):
     """ 
     HyperNetwork Classification Test
-        A 4 class classification problem, where the classes are distributed
-        as 4 symmetric Normal distributions with non overlapping support. 
+        A 2/4 class classification problem, where the classes are distributed
+        as 2/4 symmetric Normal distributions with non overlapping support. 
         The hypernetwork is trained to sample classification functions that
         fit the data, for the purpose of observing the predictive
         distributions of sampled funcitons on data outside the training

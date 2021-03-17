@@ -63,7 +63,7 @@ class GeneratorTest(parameterized.TestCase, alf.test.TestCase):
         self.assertLessEqual(float(torch.max(abs(x - y))), eps)
 
     @parameterized.parameters(
-        dict(entropy_regularization=1.0, par_vi='gfsf'),
+        #dict(entropy_regularization=1.0, par_vi='gfsf'),
         dict(entropy_regularization=1.0, par_vi='svgd'),
         dict(entropy_regularization=1.0, par_vi='svgd2'),
         dict(entropy_regularization=1.0, par_vi='svgd3'),
@@ -140,13 +140,14 @@ class GeneratorTest(parameterized.TestCase, alf.test.TestCase):
                 self.assertArrayEqual(torch.zeros(dim, dim), learned_var, 0.1)
             else:
                 self.assertGreater(
-                    float(torch.sum(torch.abs(learned_var))), 0.5)
-
+                   float(torch.sum(torch.abs(learned_var))), 0.5)
+    """
     @parameterized.parameters(
         dict(entropy_regularization=1.0),
         dict(entropy_regularization=0.0),
         dict(entropy_regularization=0.0, mi_weight=1),
     )
+    """
     def test_generator_conditional(self,
                                    entropy_regularization=0.0,
                                    par_vi='svgd',

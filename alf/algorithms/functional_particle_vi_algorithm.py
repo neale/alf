@@ -35,6 +35,10 @@ from alf.tensor_specs import TensorSpec
 from alf.nest.utils import get_outer_rank
 from alf.utils import common, math_ops, summary_utils
 from alf.utils.summary_utils import record_time
+try:
+    from sklean.metrics import roc_auc_score
+except:
+    pass
 
 
 def _expand_to_replica(inputs, replicas, spec):
@@ -91,7 +95,12 @@ class FuncParVIAlgorithm(ParVIAlgorithm):
                  function_extra_bs_ratio=0.1,
                  function_extra_bs_sampler='uniform',
                  function_extra_bs_std=1.,
+                 critic_hidden_layers=(100,100),
+                 critic_iter_num=2,
+                 critic_l2_weight=10.,
+                 critic_use_bn=True,
                  optimizer=None,
+                 critic_optimizer=None,
                  logging_network=False,
                  logging_training=False,
                  logging_evaluate=False,
@@ -137,12 +146,23 @@ class FuncParVIAlgorithm(ParVIAlgorithm):
             function_extra_bs_std (float): std of the normal distribution for
                 sampling extra training batch when using normal sampler.
 
+            critic_hidden_layers (tuple): sizes of hidden layers of the critic,
+                used for ``minmax``.
+            critic_l2_weight (float): weight of L2 regularization in training
+                the critic, used for ``minmax``.
+            critic_iter_num (int): number of critic updates for each generator
+                train_step, used for ``minmax``.
+            critic_use_bn (book): whether use batch norm for each layers of the
+                critic, used for ``minmax``.
+            critic_optimizer (torch.optim.Optimizer): Optimizer for training the
+                critic, used for ``minmax``.
+ 
             loss_type (str): loglikelihood type for the generated functions,
                 types are [``classification``, ``regression``]
             voting (str): types of voting results from sampled functions,
                 types are [``soft``, ``hard``]
             par_vi (str): types of particle-based methods for variational inference,
-                types are [``svgd``, ``gfsf``]
+                types are [``svgd``, ``gfsf``, ``minmax``]
 
                 * svgd: empirical expectation of SVGD is evaluated by reusing
                     the same batch of particles.   
@@ -150,6 +170,9 @@ class FuncParVIAlgorithm(ParVIAlgorithm):
                     involves a kernel matrix inversion, so computationally more
                     expensive, but in some cases the convergence seems faster 
                     than svgd approaches.
+                * minmax: Fisher Neural Sampler, optimal descent direction of
+                  the Stein discrepancy is solved by an inner optimization
+                  procedure in the space of L2 neural networks.
             function_vi (bool): whether to use function value based par_vi.
             optimizer (torch.optim.Optimizer): The optimizer for training.
             logging_network (bool): whether logging the archetectures of networks.
@@ -180,6 +203,11 @@ class FuncParVIAlgorithm(ParVIAlgorithm):
             num_particles=num_particles,
             entropy_regularization=entropy_regularization,
             par_vi=par_vi,
+            critic_hidden_layers=critic_hidden_layers,
+            critic_l2_weight=critic_l2_weight,
+            critic_iter_num=critic_iter_num,
+            critic_use_bn=critic_use_bn,
+            critic_optimizer=critic_optimizer,
             optimizer=optimizer,
             debug_summaries=debug_summaries,
             name=name)
@@ -218,17 +246,30 @@ class FuncParVIAlgorithm(ParVIAlgorithm):
     def set_data_loader(self,
                         train_loader,
                         test_loader=None,
+                        outlier_data_loaders=None,
                         entropy_regularization=None):
         """Set data loadder for training and testing.
 
         Args:
             train_loader (torch.utils.data.DataLoader): training data loader
             test_loader (torch.utils.data.DataLoader): testing data loader
+            outlier_data_loaders (tuple[torch.utils.data.DataLoader): 
+                (trainloader, testloader) for outlier datasets
         """
         self._train_loader = train_loader
         self._test_loader = test_loader
         if entropy_regularization is not None:
             self._entropy_regularization = entropy_regularization
+
+        if outlier_data_loaders is not None:
+            assert isinstance(outlier_data_loaders, tuple), "outlier dataset "\
+                "must be provided in the format (outlier_train, outlier_test)"
+            self._outlier_train_loader = outlier_data_loaders[0]
+            self._outlier_test_loader = outlier_data_loaders[1]
+        else:
+            self._outlier_train_loader = self._outlier_test_loader = None
+
+
 
     def predict_step(self, inputs, params=None, state=None):
         """Predict ensemble outputs for inputs using the hypernetwork model.
@@ -500,21 +541,22 @@ class FuncParVIAlgorithm(ParVIAlgorithm):
         """  
 
         with torch.no_grad():
-            outputs, labels = predict_dataset(self._test_loader,
-                                              self._param_net)
-            outputs_outlier, _ = predict_dataset(self._outlier_test,
-                                                 self._param_net)
+            outputs, labels = predict_dataset(self._param_net,
+                                              self._test_loader)
+            outputs_outlier, _ = predict_dataset(self._param_net,
+                                                 self._outlier_test_loader)
         mean_outputs = outputs.mean(0)
         mean_outputs_outlier = outputs_outlier.mean(0)
 
         probs = F.softmax(mean_outputs, -1)
         probs_outlier = F.softmax(mean_outputs_outlier, -1)
         
-        entropy = entropy_fn(probs.T.cpu().detach().numpy())
-        entropy_outlier = entropy_fn(probs_outlier.T.cpu().detach().numpy())
+        entropy = torch.distributions.Categorical(probs).entropy()
+        entropy_outlier = torch.distributions.Categorical(
+            probs_outlier).entropy()
         
-        variance = F.softmax(outputs, -1).var(0)
-        variance_outlier = F.softmax(outputs_outlier, -1).var(0)
+        variance = F.softmax(outputs, -1).var(0).sum(-1)
+        variance_outlier = F.softmax(outputs_outlier, -1).var(0).sum(-1)
 
         auroc_entropy = auc_score(entropy, entropy_outlier)
         auroc_variance = auc_score(variance, variance_outlier)

@@ -191,63 +191,14 @@ def get_classes(target, labels):
     return label_indices
 
 
-def load_mnist_inlier(label_idx=None
-                      train_bs=100,
-                      test_bs=100,
-                      num_workers=0):
-    """ Load a subset of the MNIST dataset. For OOD tasks the 
-        standard is a 6-4 inlier-outlier split. This function only 
-        loads the _inlier_ portion of the split. 
-
-    Args:
-        label_idx (list[int]): class indices for inlier data.
-        train_bs (int): training batch size.
-        test_bs (int): testing batch size. 
-        num_workers (int): number of processes to allocate for loading data.
-        
-    Returns:
-        train_loader (torch.utils.data.DataLoader): training data loader.
-        test_loader (torch.utils.data.DataLoader): test data loader.
-    """
-    kwargs = {
-        'num_workers': num_workers,
-        'pin_memory': False,
-        'drop_last': False
-    }
-    path = 'data_m/'
-    
-    if label_idx is None: # use default 6/4 split with 6 inlier classes
-        label_idx = [0, 1, 2, 3, 4, 5]
-    data_transform = transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Normalize((0.1307, ), (0.3081, ))])
-
-    trainset = datasets.MNIST(
-        root=path, train=True, download=True, transform=data_transform)
-    trainset = Subset(trainset, get_classes(trainset, label_idx))
-    train_loader = torch.utils.data.DataLoader(
-        trainset, batch_size=train_bs, shuffle=True, **kwargs)
-
-    testset = datasets.MNIST(
-        root=path, train=False, transform=transform_train_test)
-
-    testset = Subset(testset, get_classes(testset, label_idx))
-    test_loader = torch.utils.data.DataLoader(
-        testset, batch_size=test_bs, shuffle=False, **kwargs)
-
-    return train_loader, test_loader
-
-
-def load_mnist_outlier(label_idx=None,
+def load_mnist(label_idx=None,
                        train_bs=100,
                        test_bs=100,
                        num_workers=0):
-    """ Load a subset of the MNIST dataset. For OOD tasks the 
-        standard is a 6-4 inlier-outlier split. This function only 
-        loads the _outlier_ portion of the split. 
-
+    """ Loads the MNIST dataset. 
+    
     Args:
-        label_idx (list[int]): class indices for outlier data.
+        label_idx (list[int]): class indices to load from the dataset.
         train_bs (int): training batch size.
         test_bs (int): testing batch size. 
         num_workers (int): number of processes to allocate for loading data.
@@ -257,7 +208,6 @@ def load_mnist_outlier(label_idx=None,
         test_loader (torch.utils.data.DataLoader): test data loader.
     """
 
-    torch.cuda.manual_seed(1)
     kwargs = {
         'num_workers': num_workers,
         'pin_memory': False,
@@ -265,56 +215,19 @@ def load_mnist_outlier(label_idx=None,
     }
     path = 'data_m/'
     
-    if label_idx is None: # use default 6/4 split with 6 inlier classes
-        label_idx = [6, 7, 8, 9]
-
     data_transform = transforms.Compose([
         transforms.ToTensor(),
         transforms.Normalize((0.1307, ), (0.3081, ))])
 
     trainset = datasets.MNIST(
         root=path, train=False, download=True, transform=data_transform)
-    trainset = Subset(trainset, get_classes(trainset, label_idx))
-    train_loader = torch.utils.data.DataLoader(
-        trainset, batch_size=train_bs, shuffle=True, **kwargs)
-
     testset = datasets.MNIST(
-        root=path, train=False, transform=transform_train_test)
+        root=path, train=False, transform=data_transform)
 
-    testset = Subset(testset, get_classes(testset, label_idx))
-    test_loader = torch.utils.data.DataLoader(
-        testset, batch_size=test_bs, shuffle=False, **kwargs)
-
-    return train_loader, test_loader
-
-
-def load_mnist(train_bs=100, test_bs=100, num_workers=0):
-    """ Loads the the full MNIST dataset via the torchvision interface.
-
-    Args:
-        train_bs (int): training batch size.
-        test_bs (int): testing batch size. 
-        num_workers (int): number of processes to allocate for loading data.
-        
-    Returns:
-        train_loader (torch.utils.data.DataLoader): training data loader.
-        test_loader (torch.utils.data.DataLoader): test data loader.
-    """
-    kwargs = {
-        'num_workers': num_workers,
-        'pin_memory': False,
-        'drop_last': False
-    }
-    path = 'data_m/'
+    if label_idx is not None:
+        trainset = Subset(trainset, get_classes(trainset, label_idx))
+        testset = Subset(testset, get_classes(testset, label_idx))
     
-    transform_train_test = transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Normalize((0.1307, ), (0.3081, ))])
-
-    trainset = datasets.MNIST(
-        root=path, train=True, download=True, transform_train_test)
-    testset = datasets.MNIST(
-        root=path, train=False, download=True, transform_train_test)
     train_loader = torch.utils.data.DataLoader(
         trainset, batch_size=train_bs, shuffle=True, **kwargs)
     test_loader = torch.utils.data.DataLoader(
@@ -323,50 +236,14 @@ def load_mnist(train_bs=100, test_bs=100, num_workers=0):
     return train_loader, test_loader
 
 
-def load_cifar(train_bs=32, test_bs=100, num_workers=0):
-    """ Loads the full CIFAR-10 dataset via the torchvision interface.
+def load_cifar10(label_idx=None, 
+               train_bs=100,
+               test_bs=100,
+               num_workers=0):
+    """ Loads the CIFAR-10 dataset.
 
     Args:
-        train_bs (int): training batch size.
-        test_bs (int): testing batch size. 
-        num_workers (int): number of processes to allocate for loading data.
-        
-    Returns:
-        train_loader (torch.utils.data.DataLoader): training data loader.
-        test_loader (torch.utils.data.DataLoader): test data loader.
-    """
-
-    kwargs = {'num_workers': num_workers,
-              'pin_memory': False,
-              'drop_last': True}
-    path = 'data_c10/'
-
-    data_transform = transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Normalize((0.4914, 0.4822, 0.4465),
-                             (0.2023, 0.1994, 0.2010))])
-    trainset = torchvision.datasets.CIFAR10(
-        root=path, train=True, download=True, transform=data_transform)
-    trainloader = torch.utils.data.DataLoader(
-        trainset, batch_size=train_bs, shuffle=True, **kwargs)
-    testset = torchvision.datasets.CIFAR10(
-        root=path, train=False, download=True, transform=data_transform)
-    testloader = torch.utils.data.DataLoader(
-        testset, batch_size=test_bs, shuffle=False, **kwargs)
-    
-    return trainloader, testloader
-
-
-def load_cifar_inlier(label_idx=None,
-                      train_bs=100,
-                      test_bs=100,
-                      num_workers=0):
-    """ Load a subset of the CIFAR-10 dataset. For OOD tasks the 
-        standard is a 6-4 inlier-outlier split. This function only 
-        loads the _inlier_ portion of the split. 
-
-    Args:
-        label_idx (list[int]): class indices for outlier data.
+        label_idx (list[int]): classes to be loaded from the dataset.
         train_bs (int): training batch size.
         test_bs (int): testing batch size. 
         num_workers (int): number of processes to allocate for loading data.
@@ -381,54 +258,6 @@ def load_cifar_inlier(label_idx=None,
         'drop_last': False
     }
     path = 'data_c10/'
-    
-    label_idx = [0, 1, 2, 3, 4, 5]
-
-    data_transform = transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Normalize((0.4914, 0.4822, 0.4465),
-                             (0.2023, 0.1994, 0.2010))])
-
-    trainset = datasets.CIFAR10(
-        root=path, train=True, download=True, transform=data_transform)
-    trainset = Subset(trainset, get_classes(trainset, label_idx))
-    train_loader = torch.utils.data.DataLoader(
-        trainset, batch_size=train_bs, shuffle=True, **kwargs)
-
-    testset = datasets.CIFAR10(
-        root=path, train=False, download=True, transform=data_transform)
-    testset = Subset(testset, get_classes(testset, label_idx))
-    test_loader = torch.utils.data.DataLoader(
-        testset, batch_size=test_bs, shuffle=False, **kwargs)
-    return train_loader, test_loader
-
-
-def load_cifar_outlier(label_idx=None, 
-                       train_bs=100,
-                       test_bs=100,
-                       num_workers=0):
-    """ Load a subset of the CIFAR-10 dataset. For OOD tasks the 
-        standard is a 6-4 inlier-outlier split. This function only 
-        loads the _outlier_ portion of the split. 
-
-    Args:
-        label_idx (list[int]): class indices for outlier data.
-        train_bs (int): training batch size.
-        test_bs (int): testing batch size. 
-        num_workers (int): number of processes to allocate for loading data.
-        
-    Returns:
-        train_loader (torch.utils.data.DataLoader): training data loader.
-        test_loader (torch.utils.data.DataLoader): test data loader.
-    """
-    kwargs = {
-        'num_workers': num_workers,
-        'pin_memory': False,
-        'drop_last': False
-    }
-    path = 'data_c10/'
-    
-    label_idx = [6, 7, 8, 9]
     
     data_transform = transforms.Compose([
         transforms.ToTensor(),
@@ -437,13 +266,17 @@ def load_cifar_outlier(label_idx=None,
 
     trainset = datasets.CIFAR10(
         root=path, train=True, download=True, transform=data_transform)
-    trainset = Subset(trainset, get_classes(trainset, label_idx))
-    train_loader = torch.utils.data.DataLoader(
-        trainset, batch_size=train_bs, shuffle=True, **kwargs)
 
     testset = datasets.CIFAR10(
         root=path, train=False, download=True, transform=data_transform)
-    testset = Subset(testset, get_classes(testset, label_idx))
+    
+    if label_idx is not None:
+        trainset = Subset(trainset, get_classes(trainset, label_idx))
+        testset = Subset(testset, get_classes(testset, label_idx))
+    
     test_loader = torch.utils.data.DataLoader(
         testset, batch_size=test_bs, shuffle=False, **kwargs)
+    train_loader = torch.utils.data.DataLoader(
+        trainset, batch_size=train_bs, shuffle=True, **kwargs)
+
     return train_loader, test_loader

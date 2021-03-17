@@ -15,6 +15,7 @@
 from absl import logging
 import functools
 import gin
+import sys
 import math
 import numpy as np
 import torch
@@ -31,6 +32,10 @@ from alf.tensor_specs import TensorSpec
 from alf.utils import common, math_ops, summary_utils
 from alf.utils.summary_utils import record_time
 
+try:
+    from sklearn.metrics import roc_auc_score
+except:
+    pass
 
 def classification_loss(output, target):
     """
@@ -91,8 +96,8 @@ def auc_score(inliers, outliers):
         second dataset represents a set of unseen outliers.
     
     Args: 
-        inliers (Tensor): set of predictions on inlier data
-        outliers (Tensor): set of predictions on outlier data
+        inliers (torch.tensor): set of predictions on inlier data
+        outliers (torch.tensor): set of predictions on outlier data
     
     Returns:
         AUROC score (float)
@@ -127,7 +132,7 @@ def predict_dataset(model, testset):
         data = data.to(alf.get_default_device())
         target = target.to(alf.get_default_device())
         targets.append(target.view(-1))
-        output, _ = self._param_net(data)
+        output, _ = model(data)
         if output.dim() == 2:
             output = output.unsqueeze(1)
         output = output.transpose(0, 1)
@@ -714,27 +719,27 @@ class HyperNetwork(Algorithm):
         self._param_net.set_parameters(params)
 
         with torch.no_grad():
-            outputs, labels = predict_dataset(self._test_loader,
-                                              self._param_net)
-            outputs_outlier, _ = predict_dataset(self._outlier_test,
-                                                 self._param_net)
+            outputs, labels = predict_dataset(self._param_net,
+                                              self._test_loader)
+            outputs_outlier, _ = predict_dataset(self._param_net,
+                                                 self._outlier_test_loader)
         mean_outputs = outputs.mean(0)
         mean_outputs_outlier = outputs_outlier.mean(0)
 
         probs = F.softmax(mean_outputs, -1)
         probs_outlier = F.softmax(mean_outputs_outlier, -1)
         
-        entropy = entropy_fn(probs.T.cpu().detach().numpy())
-        entropy_outlier = entropy_fn(probs_outlier.T.cpu().detach().numpy())
+        entropy = torch.distributions.Categorical(probs).entropy()
+        entropy_outlier = torch.distributions.Categorical(
+            probs_outlier).entropy()
         
-        variance = F.softmax(outputs, -1).var(0)
-        variance_outlier = F.softmax(outputs_outlier, -1).var(0)
+        variance = F.softmax(outputs, -1).var(0).sum(-1)
+        variance_outlier = F.softmax(outputs_outlier, -1).var(0).sum(-1)
 
         auroc_entropy = auc_score(entropy, entropy_outlier)
         auroc_variance = auc_score(variance, variance_outlier)
         logging.info("AUROC score (entropy): {}".format(auroc_entropy))
         logging.info("AUROC score (variance): {}".format(auroc_variance))
-        logging.info("ECE score: {}".format(ece))
         alf.summary.scalar(name='eval/auroc_entropy', data=auroc_entropy)
         alf.summary.scalar(name='eval/auroc_variance', data=auroc_variance)
 
