@@ -26,7 +26,8 @@ from alf.utils import math_ops
 from alf.utils.datagen import load_nclass_test
 
 
-class HyperNetworkClassificationTest(parameterized.TestCase, alf.test.TestCase):
+class HyperNetworkClassificationTest(parameterized.TestCase,
+                                     alf.test.TestCase):
     """ 
     HyperNetwork Classification Test
         A 2/4 class classification problem, where the classes are distributed
@@ -36,7 +37,7 @@ class HyperNetworkClassificationTest(parameterized.TestCase, alf.test.TestCase):
         distributions of sampled funcitons on data outside the training
         distribution. 
     """
-    
+
     @parameterized.parameters(
         ('svgd2', False, None),
         ('svgd3', False, None),
@@ -76,8 +77,8 @@ class HyperNetworkClassificationTest(parameterized.TestCase, alf.test.TestCase):
             test_bs=train_batch_size)
         test_inputs = test_loader.dataset.get_features()
         test_targets = test_loader.dataset.get_targets()
-        
-        noise_dim = 64 
+
+        noise_dim = 64
         hidden_size = 64
         lr = 1e-2
         config = TrainerConfig(root_dir='dummy')
@@ -101,31 +102,31 @@ class HyperNetworkClassificationTest(parameterized.TestCase, alf.test.TestCase):
             critic_optimizer=alf.optimizers.Adam(lr=lr),
             pinverse_optimizer=alf.optimizers.Adam(lr=1e-3),
             config=config)
-        
+
         algorithm.set_data_loader(
             train_loader,
             test_loader,
-            entropy_regularization=batch_size/train_size)
-        absl.logging.info('Hypernetwork: Fitting {} Classes'.format(
-            num_classes))
+            entropy_regularization=batch_size / train_size)
+        absl.logging.info(
+            'Hypernetwork: Fitting {} Classes'.format(num_classes))
         absl.logging.info('{} - {} particles'.format(par_vi, num_particles))
-        
+
         def _test(i):
             outputs = algorithm.predict_step(test_inputs).output
             probs = F.softmax(outputs, dim=-1)
             preds = probs.mean(1).cpu().argmax(-1)
             mean_acc = preds.eq(test_targets.cpu().view_as(preds)).float()
             mean_acc = mean_acc.sum() / len(test_targets)
-            
+
             sample_preds = probs.cpu().argmax(-1).reshape(-1, 1)
             targets_unrolled = test_targets.unsqueeze(1).repeat(
                 1, num_particles).reshape(-1, 1)
-            
+
             sample_acc = sample_preds.eq(
                 targets_unrolled.cpu().view_as(sample_preds)).float()
-            sample_acc = sample_acc.sum()/len(targets_unrolled)
+            sample_acc = sample_acc.sum() / len(targets_unrolled)
 
-            absl.logging.info('-'*86)
+            absl.logging.info('-' * 86)
             absl.logging.info('iter {}'.format(i))
             absl.logging.info('mean particle acc: {}'.format(mean_acc.item()))
             absl.logging.info('all particles acc: {}'.format(
@@ -136,7 +137,7 @@ class HyperNetworkClassificationTest(parameterized.TestCase, alf.test.TestCase):
             algorithm.train_iter()
             if i % 1000 == 0:
                 _test(i)
-        
+
         algorithm.evaluate()
 
         outputs = algorithm.predict_step(test_inputs).output
@@ -144,21 +145,21 @@ class HyperNetworkClassificationTest(parameterized.TestCase, alf.test.TestCase):
         preds = probs.mean(1).cpu().argmax(-1)
         mean_acc = preds.eq(test_targets.cpu().view_as(preds)).float()
         mean_acc = mean_acc.sum() / len(test_targets)
-        
+
         sample_preds = probs.cpu().argmax(-1).reshape(-1, 1)
         targets_unrolled = test_targets.unsqueeze(1).repeat(
             1, num_particles).reshape(-1, 1)
-        
-        sample_acc = sample_preds.eq(targets_unrolled.cpu().view_as(sample_preds)).float()
-        sample_acc = sample_acc.sum()/len(targets_unrolled)
-        absl.logging.info('-'*86)
+
+        sample_acc = sample_preds.eq(
+            targets_unrolled.cpu().view_as(sample_preds)).float()
+        sample_acc = sample_acc.sum() / len(targets_unrolled)
+        absl.logging.info('-' * 86)
         absl.logging.info('iter {}'.format(i))
         absl.logging.info('mean particle acc: {}'.format(mean_acc.item()))
-        absl.logging.info('all particles acc: {}'.format(
-            sample_acc.item()))
+        absl.logging.info('all particles acc: {}'.format(sample_acc.item()))
         self.assertGreater(mean_acc, 0.95)
         self.assertGreater(sample_acc, 0.95)
 
-    
+
 if __name__ == "__main__":
     alf.test.main()

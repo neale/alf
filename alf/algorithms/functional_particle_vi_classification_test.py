@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-
 import absl
 from absl.testing import parameterized
 import numpy as np
@@ -37,7 +36,7 @@ class FuncParVIClassificationTest(parameterized.TestCase, alf.test.TestCase):
         distributions of sampled funcitons on data outside the training
         distribution. 
     """
-    
+
     @parameterized.parameters(
         ('svgd', False),
         ('gfsf', False),
@@ -86,7 +85,7 @@ class FuncParVIClassificationTest(parameterized.TestCase, alf.test.TestCase):
             function_vi=function_vi,
             function_bs=train_batch_size,
             function_extra_bs_ratio=0.1,
-            critic_hidden_layers=(3,),
+            critic_hidden_layers=(3, ),
             critic_iter_num=2,
             critic_l2_weight=10.,
             critic_optimizer=alf.optimizers.Adam(lr=1e-2),
@@ -95,11 +94,11 @@ class FuncParVIClassificationTest(parameterized.TestCase, alf.test.TestCase):
         algorithm.set_data_loader(
             train_loader,
             test_loader,
-            entropy_regularization=batch_size/train_size)
-        absl.logging.info('Functional Particle VI: Fitting {} Classes'.format(
-            num_classes))
+            entropy_regularization=batch_size / train_size)
+        absl.logging.info(
+            'Functional Particle VI: Fitting {} Classes'.format(num_classes))
         absl.logging.info('{} - {} particles'.format(par_vi, num_particles))
-        
+
         def _test(i):
             params = algorithm.particles
             outputs = algorithm.predict_step(test_inputs).output
@@ -110,27 +109,27 @@ class FuncParVIClassificationTest(parameterized.TestCase, alf.test.TestCase):
             preds = probs.mean(1).cpu().argmax(-1)
             mean_acc = preds.eq(test_targets.cpu().view_as(preds)).float()
             mean_acc = mean_acc.sum() / len(test_targets)
-            
+
             sample_preds = probs.cpu().argmax(-1).reshape(-1, 1)
             targets_unrolled = test_targets.unsqueeze(1).repeat(
                 1, num_particles).reshape(-1, 1)
-            
+
             sample_acc = sample_preds.eq(
                 targets_unrolled.cpu().view_as(sample_preds)).float()
-            sample_acc = sample_acc.sum()/len(targets_unrolled)
+            sample_acc = sample_acc.sum() / len(targets_unrolled)
 
-            absl.logging.info('-'*86)
+            absl.logging.info('-' * 86)
             absl.logging.info('iter {}'.format(i))
             absl.logging.info('mean particle acc: {}'.format(mean_acc.item()))
             absl.logging.info('all particles acc: {}'.format(
                 sample_acc.item()))
-        
+
         train_iter = 1500
         for i in range(train_iter):
             algorithm.train_iter()
             if i % 500 == 0:
                 _test(i)
-        
+
         algorithm.evaluate()
 
         params = algorithm.particles
@@ -141,20 +140,19 @@ class FuncParVIClassificationTest(parameterized.TestCase, alf.test.TestCase):
         preds = probs.mean(1).cpu().argmax(-1)
         mean_acc = preds.eq(test_targets.cpu().view_as(preds)).float()
         mean_acc = mean_acc.sum() / len(test_targets)
-        
+
         sample_preds = probs.cpu().argmax(-1).reshape(-1, 1)
         targets_unrolled = test_targets.unsqueeze(1).repeat(
             1, num_particles).reshape(-1, 1)
-        
+
         sample_acc = sample_preds.eq(
             targets_unrolled.cpu().view_as(sample_preds)).float()
-        sample_acc = sample_acc.sum()/len(targets_unrolled)
+        sample_acc = sample_acc.sum() / len(targets_unrolled)
 
-        absl.logging.info('-'*86)
+        absl.logging.info('-' * 86)
         absl.logging.info('iter {}'.format(i))
         absl.logging.info('mean particle acc: {}'.format(mean_acc.item()))
-        absl.logging.info('all particles acc: {}'.format(
-            sample_acc.item()))
+        absl.logging.info('all particles acc: {}'.format(sample_acc.item()))
         self.assertGreater(mean_acc, 0.95)
         self.assertGreater(sample_acc, 0.95)
 

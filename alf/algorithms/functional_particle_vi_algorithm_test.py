@@ -61,7 +61,8 @@ class FuncParVIAlgorithmTest(parameterized.TestCase, alf.test.TestCase):
         ('gfsf', False),
         ('svgd', True),
         ('gfsf', True),
-        ('minmax', False),)
+        ('minmax', False),
+    )
     def test_functional_par_vi_algorithm(self,
                                          par_vi='svgd',
                                          function_vi=False,

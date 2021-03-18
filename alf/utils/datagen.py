@@ -31,9 +31,9 @@ class TestDataSet(torch.utils.data.Dataset):
     ``input_dim``. The targets Y are computed as:
         :math:`y = w^T x + e`. Where e is drawn from a normal distribution, 
     and w is drawn from a uniform distribution.
-    """    
-    def __init__(self, input_dim=3, output_dim=1, size=1000, weight=None):
+    """
 
+    def __init__(self, input_dim=3, output_dim=1, size=1000, weight=None):
         """
         Args: 
             input_dim (int): dimensionality of samples X.
@@ -102,6 +102,7 @@ class TestNClassDataSet(torch.utils.data.Dataset):
     sampled from component i is given label i. Tests use mixture models with
     2 or 4 components.
     """
+
     def __init__(self, num_classes=2, size=200):
         """
         Args:
@@ -118,13 +119,13 @@ class TestNClassDataSet(torch.utils.data.Dataset):
             means = [(2., 2.), (-2., -2.)]
         data = torch.zeros(size, 2)
         labels = torch.zeros(size)
-        size = size//len(means)
+        size = size // len(means)
         for i, (x, y) in enumerate(means):
             dist = torch.distributions.Normal(torch.tensor([x, y]), .3)
             samples = dist.sample([size])
-            data[size*i:size*(i+1)] = samples
-            labels[size*i:size*(i+1)] = torch.ones(len(samples)) * i
-    
+            data[size * i:size * (i + 1)] = samples
+            labels[size * i:size * (i + 1)] = torch.ones(len(samples)) * i
+
         self._features = data
         self._labels = labels.long()
 
@@ -133,7 +134,7 @@ class TestNClassDataSet(torch.utils.data.Dataset):
 
     def __len__(self):
         return len(self._features)
-    
+
     def get_features(self):
         """Returns a tensor of the input samples."""
         return self._features
@@ -141,12 +142,12 @@ class TestNClassDataSet(torch.utils.data.Dataset):
     def get_targets(self):
         """Returns a tensor of the target values."""
         return self._labels
-    
+
 
 def load_nclass_test(num_classes,
                      train_size,
                      test_size,
-                     train_bs=100, 
+                     train_bs=100,
                      test_bs=100,
                      num_workers=0):
     """Loads the ``TestNClassDataset`` into a pytorch dataloader.
@@ -168,7 +169,7 @@ def load_nclass_test(num_classes,
         trainset, batch_size=train_bs, shuffle=True, num_workers=num_workers)
     test_loader = torch.utils.data.DataLoader(
         testset, batch_size=test_bs, shuffle=True, num_workers=num_workers)
-    
+
     return train_loader, test_loader
 
 
@@ -191,10 +192,7 @@ def get_classes(target, labels):
     return label_indices
 
 
-def load_mnist(label_idx=None,
-                       train_bs=100,
-                       test_bs=100,
-                       num_workers=0):
+def load_mnist(label_idx=None, train_bs=100, test_bs=100, num_workers=0):
     """ Loads the MNIST dataset. 
     
     Args:
@@ -214,20 +212,19 @@ def load_mnist(label_idx=None,
         'drop_last': False
     }
     path = 'data_m/'
-    
-    data_transform = transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Normalize((0.1307, ), (0.3081, ))])
+
+    data_transform = transforms.Compose(
+        [transforms.ToTensor(),
+         transforms.Normalize((0.1307, ), (0.3081, ))])
 
     trainset = datasets.MNIST(
         root=path, train=False, download=True, transform=data_transform)
-    testset = datasets.MNIST(
-        root=path, train=False, transform=data_transform)
+    testset = datasets.MNIST(root=path, train=False, transform=data_transform)
 
     if label_idx is not None:
         trainset = Subset(trainset, get_classes(trainset, label_idx))
         testset = Subset(testset, get_classes(testset, label_idx))
-    
+
     train_loader = torch.utils.data.DataLoader(
         trainset, batch_size=train_bs, shuffle=True, **kwargs)
     test_loader = torch.utils.data.DataLoader(
@@ -236,10 +233,7 @@ def load_mnist(label_idx=None,
     return train_loader, test_loader
 
 
-def load_cifar10(label_idx=None, 
-               train_bs=100,
-               test_bs=100,
-               num_workers=0):
+def load_cifar10(label_idx=None, train_bs=100, test_bs=100, num_workers=0):
     """ Loads the CIFAR-10 dataset.
 
     Args:
@@ -258,22 +252,23 @@ def load_cifar10(label_idx=None,
         'drop_last': False
     }
     path = 'data_c10/'
-    
+
     data_transform = transforms.Compose([
         transforms.ToTensor(),
         transforms.Normalize((0.4914, 0.4822, 0.4465),
-                             (0.2023, 0.1994, 0.2010))])
+                             (0.2023, 0.1994, 0.2010))
+    ])
 
     trainset = datasets.CIFAR10(
         root=path, train=True, download=True, transform=data_transform)
 
     testset = datasets.CIFAR10(
         root=path, train=False, download=True, transform=data_transform)
-    
+
     if label_idx is not None:
         trainset = Subset(trainset, get_classes(trainset, label_idx))
         testset = Subset(testset, get_classes(testset, label_idx))
-    
+
     test_loader = torch.utils.data.DataLoader(
         testset, batch_size=test_bs, shuffle=False, **kwargs)
     train_loader = torch.utils.data.DataLoader(

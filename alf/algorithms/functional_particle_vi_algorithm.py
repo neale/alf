@@ -95,7 +95,7 @@ class FuncParVIAlgorithm(ParVIAlgorithm):
                  function_extra_bs_ratio=0.1,
                  function_extra_bs_sampler='uniform',
                  function_extra_bs_std=1.,
-                 critic_hidden_layers=(100,100),
+                 critic_hidden_layers=(100, 100),
                  critic_iter_num=2,
                  critic_l2_weight=10.,
                  critic_use_bn=True,
@@ -268,8 +268,6 @@ class FuncParVIAlgorithm(ParVIAlgorithm):
             self._outlier_test_loader = outlier_data_loaders[1]
         else:
             self._outlier_train_loader = self._outlier_test_loader = None
-
-
 
     def predict_step(self, inputs, params=None, state=None):
         """Predict ensemble outputs for inputs using the hypernetwork model.
@@ -529,7 +527,7 @@ class FuncParVIAlgorithm(ParVIAlgorithm):
                                             *target.shape[1:])
         total_loss = regression_loss(output, target)
         return loss, total_loss
-    
+
     def eval_uncertainty(self, num_particles=None):
         """
         Function to evaluate the metrics uncertainty quantification and
@@ -538,7 +536,7 @@ class FuncParVIAlgorithm(ParVIAlgorithm):
             respect to the training data and a prespecified outlier dataset
         ECE evaluates how well calibrated the model's predictions are. That
             is, how well does the expected confidence match the accuracy
-        """  
+        """
 
         with torch.no_grad():
             outputs, labels = predict_dataset(self._param_net,
@@ -550,11 +548,11 @@ class FuncParVIAlgorithm(ParVIAlgorithm):
 
         probs = F.softmax(mean_outputs, -1)
         probs_outlier = F.softmax(mean_outputs_outlier, -1)
-        
+
         entropy = torch.distributions.Categorical(probs).entropy()
         entropy_outlier = torch.distributions.Categorical(
             probs_outlier).entropy()
-        
+
         variance = F.softmax(outputs, -1).var(0).sum(-1)
         variance_outlier = F.softmax(outputs_outlier, -1).var(0).sum(-1)
 

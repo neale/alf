@@ -37,6 +37,7 @@ try:
 except:
     pass
 
+
 def classification_loss(output, target):
     """
     Computes the cross entropy loss with respect to a batch of predictions and
@@ -50,7 +51,7 @@ def classification_loss(output, target):
         LossInfo containing the computed cross entropy loss and the average
             accuracy.
     """
-        
+
     if output.ndim == 2:
         output = output.reshape(output.shape[0], target.shape[1], -1)
     pred = output.max(-1)[1]
@@ -78,7 +79,7 @@ def regression_loss(output, target):
     Returns:
         LossInfo containing the computed MSE loss
     """
- 
+
     out_shape = output.shape[-1]
     assert (target.shape[-1] == out_shape), (
         "feature dimension of output and target does not match.")
@@ -298,7 +299,7 @@ class HyperNetwork(Algorithm):
 
         gen_output_dim = param_net.param_length
         noise_spec = TensorSpec(shape=(noise_dim, ))
-        
+
         if functional_gradient:
             net = ReluMLP(
                 noise_spec,
@@ -412,7 +413,6 @@ class HyperNetwork(Algorithm):
             self._outlier_test_loader = outlier_data_loaders[1]
         else:
             self._outlier_train_loader = self._outlier_test_loader = None
-
 
     def set_num_particles(self, num_particles):
         """Set the number of particles to sample through one forward
@@ -712,7 +712,7 @@ class HyperNetwork(Algorithm):
             respect to the training data and a prespecified outlier dataset
         ECE evaluates how well calibrated the model's predictions are. That
             is, how well does the expected confidence match the accuracy
-        """  
+        """
         if num_particles is None:
             num_particles = self._num_particles
         params = self.sample_parameters(num_particles=num_particles)
@@ -728,11 +728,11 @@ class HyperNetwork(Algorithm):
 
         probs = F.softmax(mean_outputs, -1)
         probs_outlier = F.softmax(mean_outputs_outlier, -1)
-        
+
         entropy = torch.distributions.Categorical(probs).entropy()
         entropy_outlier = torch.distributions.Categorical(
             probs_outlier).entropy()
-        
+
         variance = F.softmax(outputs, -1).var(0).sum(-1)
         variance_outlier = F.softmax(outputs_outlier, -1).var(0).sum(-1)
 
@@ -742,7 +742,6 @@ class HyperNetwork(Algorithm):
         logging.info("AUROC score (variance): {}".format(auroc_variance))
         alf.summary.scalar(name='eval/auroc_entropy', data=auroc_entropy)
         alf.summary.scalar(name='eval/auroc_variance', data=auroc_variance)
-
 
     def summarize_train(self, loss_info, params, cum_loss=None, avg_acc=None):
         """Generate summaries for training & loss info after each gradient update.

@@ -94,8 +94,11 @@ class PinverseNetwork(Network):
         else:
             joint_hidden_size = hidden_size
         if joint_fc_layer_params is None:
-            joint_fc_layer_params = (joint_hidden_size, joint_hidden_size,
-                                     joint_hidden_size,)
+            joint_fc_layer_params = (
+                joint_hidden_size,
+                joint_hidden_size,
+                joint_hidden_size,
+            )
         self._joint_encoder = EncodingNetwork(
             TensorSpec(shape=(joint_hidden_size, )),
             fc_layer_params=joint_fc_layer_params,
