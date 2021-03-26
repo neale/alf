@@ -1,19 +1,19 @@
 import alf.algorithms.hypernetwork_layer_algorithm
 
 # dataset config
-create_dataset.dataset_name='cifar'
-#create_dataset.dataset_name='cifar_inlier'
+#create_dataset.dataset_name='cifar'
+create_dataset.dataset_name='cifar_inlier'
 create_dataset.train_batch_size=50
 create_dataset.test_batch_size=100
 
 CONV_LAYER_PARAMS = ((32, 3, 1, 0, 2), (64, 3, 1, 0, 2), (64, 3, 1, 0, 2))
 FC_LAYER_PARAMS = ((128, True), )
 #HIDDEN_LAYERS = (800, 1200, 1500)
-#HIDDEN_LAYERS = (256, 512, 1024)
-HIDDEN_LAYERS = (400, 600, 1000)
+HIDDEN_LAYERS = (256, 512, 1024)
+#HIDDEN_LAYERS = (400, 600, 1000)
 #HIDDEN_LAYERS = (128, 256, 512)
 
-hypernet/Adam.lr= 1e-4
+hypernet/Adam.lr= 1e-5
 hypernet/Adam.weight_decay=1e-4
 hypernet_critic/Adam.lr=1e-4
 hypernet_critic/Adam.weight_decay=1e-4
@@ -24,11 +24,11 @@ HyperNetwork.conv_layer_params = %CONV_LAYER_PARAMS
 HyperNetwork.fc_layer_params=%FC_LAYER_PARAMS
 HyperNetwork.hidden_layers=%HIDDEN_LAYERS
 HyperNetwork.num_particles=10
-HyperNetwork.noise_dim=400 # 256
+HyperNetwork.noise_dim= 256
 
 HyperNetwork.use_fc_bn = True
 HyperNetwork.parameterization = 'network'
-HyperNetwork.par_vi = 'gfsf'
+HyperNetwork.par_vi = 'svgd'
 HyperNetwork.loss_type = 'classification'
 HyperNetwork.function_vi = False
 HyperNetwork.function_bs = 50
@@ -59,4 +59,4 @@ TrainerConfig.summary_interval=1
 TrainerConfig.debug_summaries=True
 TrainerConfig.summarize_grads_and_vars=True
 TrainerConfig.outlier_dataset='cifar_outlier'
-
+TrainerConfig.random_seed = None

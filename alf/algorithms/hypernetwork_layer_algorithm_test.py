@@ -22,7 +22,8 @@ from alf.algorithms.config import TrainerConfig
 from alf.data_structures import LossInfo
 from alf.algorithms.hypernetwork_layer_algorithm import HyperNetwork
 from alf.tensor_specs import TensorSpec
-from alf.utils import math_ops, datagen
+from alf.utils import math_ops, datagen, common
+import time
 
 
 class HyperNetworkTest(parameterized.TestCase, alf.test.TestCase):
@@ -56,16 +57,18 @@ class HyperNetworkTest(parameterized.TestCase, alf.test.TestCase):
         self.assertEqual(x.shape, y.shape)
         self.assertGreater(float(torch.min(x - y)), eps)
 
+    """
     @parameterized.parameters(
                               ('svgd3', False, None), # A-SVGD
-                              ('svgd3', True, None),  #A-SVGD-fv
+                              #('svgd3', True, None),  #A-SVGD-fv
+                              #('gfsf', False, None),  #A-GFSF
+                              #('gfsf', True, None),  #A-GFSF-fv
+                              #('minmax', False, None), #A-minmax
                               ('svgd3', False, 'rkhs'), #G-SVGD
-                              ('gfsf', False, None),  #A-GFSF
-                              ('gfsf', True, None),  #A-GFSF-fv
-                              ('minmax', False, None), #A-minmax
-                              ('minmax', True, None),  #A-minmax-fv
+                              #('minmax', True, None),  #A-minmax-fv
                               #('minmax', False, 'minmax', 100),  #G-minmax
-    )
+    )"""
+
     def test_bayesian_linear_regression(self,
                                         par_vi='svgd3',
                                         function_vi=False,
@@ -84,9 +87,10 @@ class HyperNetworkTest(parameterized.TestCase, alf.test.TestCase):
         ``minmax``.
         """
 
-        print ("Testing {} with {} particles".format(par_vi, num_particles))
-        print ("Function values: {}, \nFunctional gradient: {}".format(
+        print("Testing {} with {} particles".format(par_vi, num_particles))
+        print("Function values: {}, \nFunctional gradient: {}".format(
             function_vi, functional_gradient))
+        common.set_random_seed(None)
         input_size = 3
         input_spec = TensorSpec((input_size, ), torch.float32)
         output_dim = 1
@@ -97,7 +101,7 @@ class HyperNetworkTest(parameterized.TestCase, alf.test.TestCase):
         print("beta: {}".format(beta))
         noise = torch.randn(batch_size, output_dim)
         targets = inputs @ beta + noise
-        true_cov = torch.inverse(inputs.t() @ inputs) 
+        true_cov = torch.inverse(inputs.t() @ inputs)
         true_mean = true_cov @ inputs.t() @ targets
         noise_dim = input_size
         lr = 1e-3
@@ -121,8 +125,9 @@ class HyperNetworkTest(parameterized.TestCase, alf.test.TestCase):
             function_vi=function_vi,
             function_bs=train_batch_size,
             pinverse_solve_iters=1,
-            pinverse_hidden_size=100,
+            pinverse_hidden_size=10,
             fullrank_diag_weight=1,
+            #exact_inverse=True,
             parameterization=parameterization,
             critic_hidden_layers=(hidden_size, hidden_size),
             critic_iter_num=5,
@@ -150,28 +155,30 @@ class HyperNetworkTest(parameterized.TestCase, alf.test.TestCase):
                 inputs=(train_inputs, train_targets),
                 entropy_regularization=entropy_regularization,
                 num_particles=num_particles)
-            
+
             if functional_gradient:
                 pinverse_loss = alg_step.info.extra.pinverse
-                if i % 500 == 0: 
+                if i % 500 == 0:
                     print(pinverse_loss)
-            
+
             loss_info, params = algorithm.update_with_gradient(alg_step.info)
-        
+
         def _test(i, sampled_predictive=False, s=100):
 
             print("-" * 68)
             if parameterization == 'layer':
-                weight = algorithm._generator._net.layer_encoders[0]._fc_layers[0].weight
-                learned_mean = algorithm._generator._net.layer_encoders[0]._fc_layers[0].bias
+                weight = algorithm._generator._net.layer_encoders[
+                    0]._fc_layers[0].weight
+                learned_mean = algorithm._generator._net.layer_encoders[
+                    0]._fc_layers[0].bias
             else:
                 weight = algorithm._generator._net._fc_layers[0].weight
                 learned_mean = algorithm._generator._net._fc_layers[0].bias
-            print (weight.shape)
+            print(weight.shape)
             learned_cov = weight @ weight.t()
             print("norm of generator weight: {}".format(weight.norm()))
             print("norm of learned cov: {}".format(learned_cov.norm()))
-           
+
             predicts = inputs @ learned_mean  # [batch]
             pred_err = torch.norm(predicts - targets.squeeze())
 
@@ -180,7 +187,7 @@ class HyperNetworkTest(parameterized.TestCase, alf.test.TestCase):
 
             cov_err = torch.norm(learned_cov - true_cov)
             cov_err = cov_err / torch.norm(true_cov)
-            
+
             print("Train Iter: {}".format(i))
             print("\tpred err {}".format(pred_err))
             print("\tmean err {}".format(mean_err))
@@ -207,7 +214,6 @@ class HyperNetworkTest(parameterized.TestCase, alf.test.TestCase):
                 scov_err = torch.norm(computed_cov - true_cov)
                 scov_err = scov_err / torch.norm(true_cov)
                 print("train_iter {}: sampled cov err {}".format(i, scov_err))
-            
 
         train_iter = 50000
         for i in range(train_iter):
@@ -216,8 +222,10 @@ class HyperNetworkTest(parameterized.TestCase, alf.test.TestCase):
                 _test(i)
 
         if parameterization == 'layer':
-            weight = algorithm._generator._net.layer_encoders[0]._fc_layers[0].weight
-            learned_mean = algorithm._generator._net.layer_encoders[0]._fc_layers[0].bias
+            weight = algorithm._generator._net.layer_encoders[0]._fc_layers[
+                0].weight
+            learned_mean = algorithm._generator._net.layer_encoders[
+                0]._fc_layers[0].bias
         else:
             weight = algorithm._generator._net._fc_layers[0].weight
             learned_mean = algorithm._generator._net._fc_layers[0].bias

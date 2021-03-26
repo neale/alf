@@ -11,10 +11,9 @@ FC_LAYER_PARAMS = ((84, True), )
 HIDDEN_LAYERS = (256, 512, 1024)
 
 hypernet/Adam.lr=1e-5
-hypernet/Adam.weight_decay=0 #1e-4 for all but minmax
+hypernet/Adam.weight_decay=1e-4 # for all but minmax
 hypernet_critic/Adam.lr=1e-4
 hypernet_critic/Adam.weight_decay=0 # 1e-4
-hypernet_pinverse/Adam.lr=1e-4
 
 # algorithm config
 HyperNetwork.conv_layer_params = %CONV_LAYER_PARAMS
@@ -25,13 +24,12 @@ HyperNetwork.noise_dim=256
 
 HyperNetwork.use_fc_bn = True
 HyperNetwork.parameterization = 'network'
-HyperNetwork.par_vi = 'minmax'
+HyperNetwork.par_vi = 'svgd3'
 HyperNetwork.loss_type = 'classification'
 HyperNetwork.function_vi = False
 HyperNetwork.entropy_regularization = 1e-5
 HyperNetwork.function_bs = 50
 HyperNetwork.optimizer=@hypernet/Adam()
-HyperNetwork.pinverse_optimizer=@hypernet_pinverse/Adam()
 HyperNetwork.critic_optimizer=@hypernet_critic/Adam()
 HyperNetwork.critic_hidden_layers=(512,512)
 HyperNetwork.critic_iter_num=5
@@ -56,4 +54,4 @@ TrainerConfig.summary_interval=1
 TrainerConfig.debug_summaries=True
 TrainerConfig.summarize_grads_and_vars=True
 TrainerConfig.outlier_dataset='mnist_outlier'
-
+TrainerConfig.random_seed = None

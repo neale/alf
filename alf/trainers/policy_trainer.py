@@ -112,7 +112,7 @@ class Trainer(object):
     Trainer is responsible for creating algorithm and dataset/environment, setting up
     summary, checkpointing, running training iterations, and evaluating periodically.
     """
-    
+
     _trainer_progress = _TrainerProgress()
 
     def __init__(self, config: TrainerConfig):
@@ -506,7 +506,8 @@ class SLTrainer(Trainer):
             last_layer_param=(output_dim, True),
             last_activation=math_ops.identity,
             config=config)
-        
+
+        print(self._random_seed)
         if self._eval_uncertainty:
             outlier_train, outlier_test = create_dataset(
                 dataset_name=config.outlier_dataset)
@@ -515,10 +516,8 @@ class SLTrainer(Trainer):
             outlier_test = None
 
         self._algorithm.set_data_loader(
-            trainset,
-            testset,
-            outlier=(outlier_train, outlier_test))
-    
+            trainset, testset, outlier=(outlier_train, outlier_test))
+
     def _create_dataset(self):
         """Create data loaders."""
         return create_dataset()
@@ -536,17 +535,15 @@ class SLTrainer(Trainer):
             logging.info("-" * 68)
             logging.info("Epoch: {}".format(epoch_num + 1))
 
-            #with record_time("time/train_iter"):
-            #    self._algorithm.train_iter()
-            
-            #eval_particles = 10
-            eval_particles = epoch_num-begin_epoch_num+1
-            print ('eval particles: ', eval_particles)
+            with record_time("time/train_iter"):
+                self._algorithm.train_iter()
+
             if self._evaluate and (epoch_num + 1) % self._eval_interval == 0:
-                self._algorithm.evaluate(num_particles=eval_particles)
-            
-            if (self._eval_uncertainty and (epoch_num + 1) % self._eval_interval == 0):
-                self._algorithm.eval_uncertainty(num_particles=eval_particles)
+                self._algorithm.evaluate()
+
+            if (self._eval_uncertainty
+                    and (epoch_num + 1) % self._eval_interval == 0):
+                self._algorithm.eval_uncertainty()
 
             if epoch_num == begin_epoch_num:
                 self._summarize_training_setting()
@@ -557,9 +554,9 @@ class SLTrainer(Trainer):
 
             if (self._num_epochs and epoch_num >= self._num_epochs):
                 if self._evaluate:
-                    self._algorithm.evaluate(num_particles=eval_particles)
+                    self._algorithm.evaluate()
                 if self._eval_uncertainty:
-                    self._algorithm.eval_uncertainty(num_particles=eval_particles)
+                    self._algorithm.eval_uncertainty()
                 break
 
             if self._num_epochs and epoch_num >= time_to_checkpoint:

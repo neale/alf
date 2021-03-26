@@ -70,14 +70,13 @@ def load_mnist_inlier(train_bs=100, test_bs=100, num_workers=0):
         standard is a 6-4 inlier-outlier split. This function only 
         loads the inlier portion of the split
     """
-    torch.cuda.manual_seed(1)
     kwargs = {
         'num_workers': num_workers,
         'pin_memory': False,
         'drop_last': False
     }
     path = 'data_m/'
-    
+
     label_idx = [0, 1, 2, 3, 4, 5]
 
     trainset = datasets.MNIST(
@@ -86,30 +85,25 @@ def load_mnist_inlier(train_bs=100, test_bs=100, num_workers=0):
         download=True,
         transform=transforms.Compose([
             transforms.ToTensor(),
-            transforms.Normalize((0.1307, ), (0.3081, ))]))
-    
-    trainset = torch.utils.data.Subset(trainset, get_classes(
-        trainset, label_idx))
+            transforms.Normalize((0.1307, ), (0.3081, ))
+        ]))
+
+    trainset = torch.utils.data.Subset(trainset,
+                                       get_classes(trainset, label_idx))
     train_loader = torch.utils.data.DataLoader(
-        trainset,
-        batch_size=train_bs,
-        shuffle=True,
-        **kwargs)
+        trainset, batch_size=train_bs, shuffle=True, **kwargs)
 
     testset = datasets.MNIST(
         path,
         train=False,
         transform=transforms.Compose([
             transforms.ToTensor(),
-            transforms.Normalize((0.1307, ), (0.3081, ))]))
+            transforms.Normalize((0.1307, ), (0.3081, ))
+        ]))
 
-    testset = torch.utils.data.Subset(testset, get_classes(
-        testset, label_idx))
+    testset = torch.utils.data.Subset(testset, get_classes(testset, label_idx))
     test_loader = torch.utils.data.DataLoader(
-        testset,
-        batch_size=test_bs,
-        shuffle=False,
-        **kwargs)
+        testset, batch_size=test_bs, shuffle=False, **kwargs)
     return train_loader, test_loader
 
 
@@ -117,14 +111,13 @@ def load_mnist_outlier(train_bs=100, test_bs=100, num_workers=0):
     """ load the outlier subset of the MNIST dataset. This function 
         only loads the outlier portion of the split
     """
-    torch.cuda.manual_seed(1)
     kwargs = {
         'num_workers': num_workers,
         'pin_memory': False,
         'drop_last': False
     }
     path = 'data_m/'
-    
+
     label_idx = [6, 7, 8, 9]
 
     trainset = datasets.MNIST(
@@ -133,30 +126,25 @@ def load_mnist_outlier(train_bs=100, test_bs=100, num_workers=0):
         download=True,
         transform=transforms.Compose([
             transforms.ToTensor(),
-            transforms.Normalize((0.1307, ), (0.3081, ))]))
-    
-    trainset = torch.utils.data.Subset(trainset, get_classes(
-        trainset, label_idx))
+            transforms.Normalize((0.1307, ), (0.3081, ))
+        ]))
+
+    trainset = torch.utils.data.Subset(trainset,
+                                       get_classes(trainset, label_idx))
     train_loader = torch.utils.data.DataLoader(
-        trainset,
-        batch_size=train_bs,
-        shuffle=True,
-        **kwargs)
+        trainset, batch_size=train_bs, shuffle=True, **kwargs)
 
     testset = datasets.MNIST(
         path,
         train=False,
         transform=transforms.Compose([
             transforms.ToTensor(),
-            transforms.Normalize((0.1307, ), (0.3081, ))]))
+            transforms.Normalize((0.1307, ), (0.3081, ))
+        ]))
 
-    testset = torch.utils.data.Subset(testset, get_classes(
-        testset, label_idx))
+    testset = torch.utils.data.Subset(testset, get_classes(testset, label_idx))
     test_loader = torch.utils.data.DataLoader(
-        testset,
-        batch_size=test_bs,
-        shuffle=False,
-        **kwargs)
+        testset, batch_size=test_bs, shuffle=False, **kwargs)
     return train_loader, test_loader
 
 
@@ -278,19 +266,19 @@ def load_cifar_hidden(train_bs=32, test_bs=100, c_idx=[0, 1, 2, 3, 4]):
         test_hidden, batch_size=test_bs, shuffle=False, **kwargs)
     return trainloader, testloader
 
+
 def load_cifar_inlier(train_bs=100, test_bs=100, num_workers=0):
     """ load a subset of the MNIST dataset. For OOD experiments the 
         standard is a 6-4 inlier-outlier split. This function only 
         loads the inlier portion of the split
     """
-    torch.cuda.manual_seed(1)
     kwargs = {
         'num_workers': num_workers,
         'pin_memory': False,
         'drop_last': False
     }
     path = 'data_c10/'
-    
+
     label_idx = [0, 1, 2, 3, 4, 5]
 
     trainset = datasets.CIFAR10(
@@ -300,15 +288,13 @@ def load_cifar_inlier(train_bs=100, test_bs=100, num_workers=0):
         transform=transforms.Compose([
             transforms.ToTensor(),
             transforms.Normalize((0.4914, 0.4822, 0.4465),
-                                 (0.2023, 0.1994, 0.2010))]))
-    
-    trainset = torch.utils.data.Subset(trainset, get_classes(
-        trainset, label_idx))
+                                 (0.2023, 0.1994, 0.2010))
+        ]))
+
+    trainset = torch.utils.data.Subset(trainset,
+                                       get_classes(trainset, label_idx))
     train_loader = torch.utils.data.DataLoader(
-        trainset,
-        batch_size=train_bs,
-        shuffle=True,
-        **kwargs)
+        trainset, batch_size=train_bs, shuffle=True, **kwargs)
 
     testset = datasets.CIFAR10(
         path,
@@ -316,15 +302,12 @@ def load_cifar_inlier(train_bs=100, test_bs=100, num_workers=0):
         transform=transforms.Compose([
             transforms.ToTensor(),
             transforms.Normalize((0.4914, 0.4822, 0.4465),
-                                 (0.2023, 0.1994, 0.2010))]))
+                                 (0.2023, 0.1994, 0.2010))
+        ]))
 
-    testset = torch.utils.data.Subset(testset, get_classes(
-        testset, label_idx))
+    testset = torch.utils.data.Subset(testset, get_classes(testset, label_idx))
     test_loader = torch.utils.data.DataLoader(
-        testset,
-        batch_size=test_bs,
-        shuffle=False,
-        **kwargs)
+        testset, batch_size=test_bs, shuffle=False, **kwargs)
     return train_loader, test_loader
 
 
@@ -333,14 +316,13 @@ def load_cifar_outlier(train_bs=100, test_bs=100, num_workers=0):
         standard is a 6-4 inlier-outlier split. This function only 
         loads the inlier portion of the split
     """
-    torch.cuda.manual_seed(1)
     kwargs = {
         'num_workers': num_workers,
         'pin_memory': False,
         'drop_last': False
     }
     path = 'data_c10/'
-    
+
     label_idx = [6, 7, 8, 9]
 
     trainset = datasets.CIFAR10(
@@ -350,15 +332,13 @@ def load_cifar_outlier(train_bs=100, test_bs=100, num_workers=0):
         transform=transforms.Compose([
             transforms.ToTensor(),
             transforms.Normalize((0.4914, 0.4822, 0.4465),
-                                 (0.2023, 0.1994, 0.2010))]))
-    
-    trainset = torch.utils.data.Subset(trainset, get_classes(
-        trainset, label_idx))
+                                 (0.2023, 0.1994, 0.2010))
+        ]))
+
+    trainset = torch.utils.data.Subset(trainset,
+                                       get_classes(trainset, label_idx))
     train_loader = torch.utils.data.DataLoader(
-        trainset,
-        batch_size=train_bs,
-        shuffle=True,
-        **kwargs)
+        trainset, batch_size=train_bs, shuffle=True, **kwargs)
 
     testset = datasets.CIFAR10(
         path,
@@ -366,14 +346,10 @@ def load_cifar_outlier(train_bs=100, test_bs=100, num_workers=0):
         transform=transforms.Compose([
             transforms.ToTensor(),
             transforms.Normalize((0.4914, 0.4822, 0.4465),
-                                 (0.2023, 0.1994, 0.2010))]))
+                                 (0.2023, 0.1994, 0.2010))
+        ]))
 
-    testset = torch.utils.data.Subset(testset, get_classes(
-        testset, label_idx))
+    testset = torch.utils.data.Subset(testset, get_classes(testset, label_idx))
     test_loader = torch.utils.data.DataLoader(
-        testset,
-        batch_size=test_bs,
-        shuffle=False,
-        **kwargs)
+        testset, batch_size=test_bs, shuffle=False, **kwargs)
     return train_loader, test_loader
-

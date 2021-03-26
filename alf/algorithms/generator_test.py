@@ -24,7 +24,7 @@ from alf.algorithms.generator import Generator
 from alf.networks import Network
 from alf.networks.relu_mlp import ReluMLP
 from alf.tensor_specs import TensorSpec
-from alf.utils import math_ops
+from alf.utils import math_ops, common
 
 
 class Net(Network):
@@ -68,20 +68,22 @@ class GeneratorTest(parameterized.TestCase, alf.test.TestCase):
         self.assertEqual(x.shape, y.shape)
         self.assertLessEqual(float(torch.max(abs(x - y))), eps)
 
-    #@parameterized.parameters(
+    """
+    @parameterized.parameters(
         #dict(entropy_regularization=1.0, par_vi='svgd'),
         #dict(entropy_regularization=1.0, par_vi='svgd2'),
-        #dict(entropy_regularization=1.0, par_vi='svgd3'),
+        dict(entropy_regularization=1.0, par_vi='svgd3'),
         #dict(entropy_regularization=1.0, par_vi='gfsf'),
-        #dict(entropy_regularization=1.0, par_vi='svgd3', functional_gradient='rkhs'),
+        dict(entropy_regularization=1.0, par_vi='svgd3', functional_gradient='rkhs'),
         #dict(entropy_regularization=1.0, par_vi='minmax'),
         #dict(entropy_regularization=0.0),
         #dict(entropy_regularization=0.0, mi_weight=1),
-    #)
+    )"""
+
     def test_generator_unconditional(self,
                                      entropy_regularization=1.0,
                                      par_vi='svgd3',
-                                     functional_gradient=None,
+                                     functional_gradient='rkhs',
                                      mi_weight=None):
         r"""
         The generator is trained to match (STEIN) / maximize (ML) the likelihood
@@ -91,22 +93,23 @@ class GeneratorTest(parameterized.TestCase, alf.test.TestCase):
         """
         logging.info("entropy_regularization: %s par_vi: %s mi_weight: %s" %
                      (entropy_regularization, par_vi, mi_weight))
-        dim = 5
-        batch_size = 512
-        hidden_size = 5
-        noise_dim = 5
-        init_w = torch.randn(noise_dim, dim)
+        common.set_random_seed(None)
+        dim = 25
+        batch_size = 64
+        hidden_size = 25
+        noise_dim = 25
         init_w = torch.randn(noise_dim, dim)
         if functional_gradient is not None:
-            noise_dim = 5
+            noise_dim = 25
             input_dim = TensorSpec((noise_dim, ))
             net = ReluMLP(input_dim, hidden_layers=(), output_size=dim)
-            net._fc_layers[0].weight.data = torch.tensor(torch.randn(dim, dim), dtype=torch.float32).T
-                #[[1, 2], [1, 1]],
+            net._fc_layers[0].weight.data = torch.tensor(
+                torch.randn(dim, dim), dtype=torch.float32).T
+            #[[1, 2], [1, 1]],
             critic_relu_mlp = True
         else:
             net = Net(dim, init_w)
-        print (par_vi)
+        print(par_vi)
         generator = Generator(
             dim,
             noise_dim=noise_dim,
@@ -115,16 +118,15 @@ class GeneratorTest(parameterized.TestCase, alf.test.TestCase):
             mi_weight=mi_weight,
             par_vi=par_vi,
             functional_gradient=functional_gradient,
-            pinverse_hidden_size=300,
+            pinverse_hidden_size=1024,
             critic_hidden_layers=(hidden_size, hidden_size),
             optimizer=alf.optimizers.AdamTF(lr=1e-3),
             critic_optimizer=alf.optimizers.AdamTF(lr=1e-3))
-        
-        #var = torch.tensor([[1, 2], [3, 4]], dtype=torch.float32)
+
         var = torch.rand(dim, dim).float()
         var = torch.mm(var, var.t())
         precision = torch.inverse(var)
-        print ('true var', var)
+        print('true var', var)
 
         def _neglogprob(x):
             y = 0.5 * torch.einsum('bi,ij,bj->b', x, precision, x)
@@ -132,22 +134,23 @@ class GeneratorTest(parameterized.TestCase, alf.test.TestCase):
 
         def _train(i):
             alg_step = generator.train_step(
-                inputs=None,
-                loss_func=_neglogprob,
-                batch_size=batch_size)
+                inputs=None, loss_func=_neglogprob, batch_size=batch_size)
             generator.update_with_gradient(alg_step.info)
 
         for i in range(20000):
             _train(i)
             if functional_gradient is not None:
-                learned_var = torch.matmul(
-                    net._fc_layers[0].weight,
-                    net._fc_layers[0].weight.t())
-                
+                learned_var = torch.matmul(net._fc_layers[0].weight,
+                                           net._fc_layers[0].weight.t())
+
             else:
                 learned_var = torch.matmul(net.fc.weight, net.fc.weight.t())
             if i % 500 == 0:
                 print(i, "learned var=", learned_var)
+                print('[{}] avg per dim variance error: {}'.format(
+                    i, (var - learned_var).mean()))
+        print('[{}] avg per dim variance error: {}'.format(
+            i, (var - learned_var).mean()))
         if entropy_regularization == 1.0:
             #self.assertArrayEqual(torch.diag(var), learned_var, 0.1)
             print(par_vi, ': ', float(torch.max(abs(var - learned_var))))
@@ -219,6 +222,7 @@ class GeneratorTest(parameterized.TestCase, alf.test.TestCase):
         else:
             self.assertArrayEqual(net.fc2.weight.t(), u, 0.1)
             self.assertArrayEqual(torch.zeros(dim, dim), learned_var, 0.1)
+
 
 if __name__ == '__main__':
     alf.test.main()

@@ -47,7 +47,7 @@ def classification_loss(output, target):
     if output.dim == 3:
         output = output.transpose(1, 2)
     else:
-        output = output.reshape(output.shape[0]*target.shape[1], -1)
+        output = output.reshape(output.shape[0] * target.shape[1], -1)
         target = target.reshape(-1)
     loss = F.cross_entropy(output, target)
     return FuncParVILossInfo(loss=loss, extra=avg_acc)
@@ -122,7 +122,7 @@ class FuncParVIAlgorithm(ParVIAlgorithm):
                  optimizer=None,
                  critic_iter_num=2,
                  critic_l2_weight=10,
-                 critic_hidden_layers=(100,100),
+                 critic_hidden_layers=(100, 100),
                  critic_use_bn=True,
                  critic_optimizer=None,
                  logging_network=False,
@@ -216,7 +216,7 @@ class FuncParVIAlgorithm(ParVIAlgorithm):
             logging.info("Each network")
             logging.info("-" * 68)
             logging.info(param_net)
-        
+
         critic_input_dim = particle_dim
         if function_vi:
             critic_input_dim = function_bs * param_net._output_spec.shape[0]
@@ -284,9 +284,9 @@ class FuncParVIAlgorithm(ParVIAlgorithm):
                 "provided in the format (outlier_train, outlier_test)"
             self._outlier_train = outlier[0]
             self._outlier_test = outlier[1]
-        else: 
+        else:
             self._outlier_train = self._outlier_test = None
- 
+
     def predict_step(self, inputs, params=None, state=None):
         """Predict ensemble outputs for inputs using the hypernetwork model.
 
@@ -413,11 +413,11 @@ class FuncParVIAlgorithm(ParVIAlgorithm):
         outputs = aug_outputs[:data.shape[0]]  # [B, P, D]
         outputs = outputs.transpose(0, 1)
         outputs = outputs.view(num_particles, -1)  # [P, B * D]
-        
+
         density_outputs = aug_outputs[-extra_samples.shape[0]:]  # [b, P, D]
         density_outputs = density_outputs.transpose(0, 1)  # [P, b, D]
         density_outputs = density_outputs.view(num_particles, -1)  # [P, b * D]
-        
+
         return outputs, density_outputs
 
     def _function_neglogprob(self, targets, outputs):
@@ -444,9 +444,8 @@ class FuncParVIAlgorithm(ParVIAlgorithm):
         else:
             # [B] -> [B, N, 1]
             targets = targets.unsqueeze(1)
-            targets = targets.unsqueeze(1).expand(*targets.shape[:1],
-                                                  num_particles,
-                                                  *targets.shape[1:])
+            targets = targets.unsqueeze(1).expand(
+                *targets.shape[:1], num_particles, *targets.shape[1:])
             # [B, N, 1] -> [N, B, 1]
             targets = targets.permute(1, 0, 2)
 
@@ -474,7 +473,8 @@ class FuncParVIAlgorithm(ParVIAlgorithm):
                                         self._param_net.output_spec)
         else:
             # [B] -> [B, N]
-            target = target.unsqueeze(1).expand(*target.shape[:1], num_particles)
+            target = target.unsqueeze(1).expand(*target.shape[:1],
+                                                num_particles)
         return self._loss_func(output, target)
 
     def evaluate(self, num_particles=None):
@@ -492,7 +492,8 @@ class FuncParVIAlgorithm(ParVIAlgorithm):
                 target = target.to(alf.get_default_device())
                 output, _ = self._param_net(data)  # [B, N, D]
                 if num_particles is not None:
-                    idxs = torch.randint(0, self._num_particles, (num_particles,))
+                    idxs = torch.randint(0, self._num_particles,
+                                         (num_particles, ))
                     output = torch.index_select(output, 1, idxs)
                 loss, extra = self._vote(output, target)
                 if self._loss_type == 'classification':
@@ -540,19 +541,18 @@ class FuncParVIAlgorithm(ParVIAlgorithm):
                                             *target.shape[1:])
         total_loss = regression_loss(output, target)
         return loss, total_loss
-    
+
     def eval_uncertainty(self, num_particles=None):
         # Soft voting for now
         with torch.no_grad():
             outputs, labels = self._predict_dataset(self._test_loader,
-                                                        num_particles)
+                                                    num_particles)
         probs = F.softmax(outputs.mean(0), -1)
-        
 
         entropy = entropy_fn(probs.T.cpu().detach().numpy())
         with torch.no_grad():
             outputs_outlier, _ = self._predict_dataset(self._outlier_test,
-                                                        num_particles)
+                                                       num_particles)
         probs_outlier = F.softmax(outputs_outlier.mean(0), -1)
         entropy_outlier = entropy_fn(probs_outlier.T.cpu().detach().numpy())
         auroc_entropy = self._auc_score(entropy, entropy_outlier)
@@ -561,7 +561,6 @@ class FuncParVIAlgorithm(ParVIAlgorithm):
         ece_score = self._ece_score(probs, labels)
         alf.summary.scalar(name='eval/ece', data=ece_score)
         logging.info("ECE score: {}".format(ece_score))
-
 
     def _auc_score(self, inliers, outliers):
         """
@@ -581,7 +580,7 @@ class FuncParVIAlgorithm(ParVIAlgorithm):
         y_true = np.array([0] * len(inliers) + [1] * len(outliers))
         y_score = np.concatenate([inliers, outliers])
         return roc_auc_score(y_true, y_score)
-    
+
     def _ece_score(self, probs, labels, bins=15):
         labels = labels.cpu().numpy()
         probs = probs.detach().cpu().numpy()
@@ -612,9 +611,6 @@ class FuncParVIAlgorithm(ParVIAlgorithm):
             data = data.to(alf.get_default_device())
             target = target.to(alf.get_default_device())
             output, _ = self._param_net(data)
-            if num_particles is not None:
-                idxs = torch.randint(0, output.shape[1], (num_particles,))
-                output = torch.index_select(output, 1, idxs)
             targets.append(target.view(-1))
             if output.dim() == 2:
                 output = output.unsqueeze(1)

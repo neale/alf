@@ -300,6 +300,7 @@ class Generator(Algorithm):
                  pinverse_hidden_size=100,
                  pinverse_use_solver=False,
                  use_jac_regularization=False,
+                 exact_inverse=False,
                  critic_input_dim=None,
                  critic_hidden_layers=(100, 100),
                  critic_l2_weight=10.,
@@ -388,7 +389,7 @@ class Generator(Algorithm):
                     optimizer=critic_optimizer)
             else:
                 raise ValueError("Unsupported par_vi method: %s" % par_vi)
-        
+
         if functional_gradient is not None:
             if functional_gradient == 'rkhs':
                 self._grad_func = self._rkhs_func_grad
@@ -425,11 +426,12 @@ class Generator(Algorithm):
 
             if noise_dim == output_dim:
                 force_fullrank = False
-            
+
             self._force_fullrank = force_fullrank
             self._fullrank_diag_weight = fullrank_diag_weight
             self._pinverse_solve_iters = pinverse_solve_iters
             self._use_jac_regularization = use_jac_regularization
+            self._exact_inverse = exact_inverse
             self._pinverse_use_solver = pinverse_use_solver
 
             if not pinverse_use_solver:
@@ -491,12 +493,13 @@ class Generator(Algorithm):
                  batch_size=None,
                  training=True,
                  use_jac_regularization=None):
-        
+
         if inputs is None:
             assert self._input_tensor_spec is None
             if noise is None:
                 assert batch_size is not None
-                noise = torch.randn(batch_size, self._noise_dim)#.normal_(0, 4)
+                noise = torch.randn(batch_size,
+                                    self._noise_dim)  #.normal_(0, 4)
             gen_inputs = noise
         else:
             nest.assert_same_structure(inputs, self._input_tensor_spec)
@@ -514,8 +517,11 @@ class Generator(Algorithm):
                 if use_jac_regularization is None:
                     use_jac_regularization = self._use_jac_regularization
                 outputs = self._net(
-                    gen_inputs, requires_jac=use_jac_regularization)[0]
-                if use_jac_regularization and self._force_fullrank:
+                    gen_inputs,
+                    requires_jac=(use_jac_regularization
+                                  or self._exact_inverse))[0]
+                if (use_jac_regularization
+                        or self._exact_inverse) and self._force_fullrank:
                     outputs, jac = outputs
                     extra_noise = torch.randn(
                         noise.shape[0], self._output_dim - self._noise_dim)
@@ -529,7 +535,8 @@ class Generator(Algorithm):
                     outputs = (outputs, jac)
                 elif self._force_fullrank:
                     extra_noise = torch.randn(
-                        noise.shape[0], self._output_dim - self._noise_dim)#.normal_(0, 1)
+                        noise.shape[0],
+                        self._output_dim - self._noise_dim)  #.normal_(0, 1)
                     gen_inputs = torch.cat((gen_inputs, extra_noise), dim=-1)
                     outputs += self._fullrank_diag_weight * gen_inputs
             else:
@@ -648,7 +655,6 @@ class Generator(Algorithm):
         #self._kernel_width_averager.update(width)
         #return self._kernel_width_averager.get()
         return width
-
 
     def _rbf_func(self, x, y):
         """Compute RGF kernel, used by svgd_grad. """
@@ -880,26 +886,29 @@ class Generator(Algorithm):
                 b2_dim, b_dim, d_dim = eps.shape
                 if self._pinverse is None:
                     #self._pinverse = torch.zeros(*eps.shape, requires_grad=True)
-                    self._pinverse = torch.randn(*eps.shape, requires_grad=True)
+                    self._pinverse = torch.randn(
+                        *eps.shape, requires_grad=True)
                     #self._pinverse = torch.nn.init.orthogonal_(self._pinverse)
                     self._pinverse = self._pinverse.view(-1, d_dim)
                 jac = self._net.compute_jac(z_inputs)
                 jac = torch.repeat_interleave(jac, b_dim, dim=1)
-                jac = jac.view(-1, d_dim, d_dim).detach().cpu().numpy() # [B'*B, D, D]
+                jac = jac.view(-1, d_dim,
+                               d_dim).detach().cpu().numpy()  # [B'*B, D, D]
                 eps = eps.view(-1, d_dim).detach().cpu().numpy()  # [B'*B, D]
                 p = []
-                for i in range(b_dim*b2_dim):
+                for i in range(b_dim * b2_dim):
                     A = jac[i]
                     b = eps[i]
-                    y, exitCode = bicgstab(A,
-                                           b,
-                                           x0=self._pinverse[i].detach().cpu(),
-                                           maxiter=1,
-                                           atol=1e-2)  # [D]
+                    y, exitCode = bicgstab(
+                        A,
+                        b,
+                        x0=self._pinverse[i].detach().cpu(),
+                        maxiter=1,
+                        atol=1e-2)  # [D]
                     p.append(y)
                 self._pinverse = torch.as_tensor(np.stack(p))
                 loss = ()
-                print (self._pinverse.norm().item())
+                print(self._pinverse.norm().item())
             else:
                 z_inputs = torch.repeat_interleave(
                     z_inputs, eps.shape[1], dim=0)  # [N2*N, K]
@@ -960,12 +969,12 @@ class Generator(Algorithm):
         assert inputs is None, (
             '``rkhs`` does not support conditional generator')
         outputs, gen_inputs = outputs  # [N, D], [N, D, K]
-        if self._use_jac_regularization:
+        if self._use_jac_regularization or self._exact_inverse:
             outputs, jac = outputs
         num_particles = outputs.shape[0]
         outputs2, gen_inputs2 = self._predict(
             batch_size=num_particles)  # [N2, D]
-        if self._use_jac_regularization:
+        if self._use_jac_regularization or self._exact_inverse:
             outputs2, _ = outputs2
 
         # [N2, N], [N2, N, D]
@@ -976,13 +985,19 @@ class Generator(Algorithm):
             pinverse_loss = self._pinverse_train_step(gen_inputs2.detach(),
                                                       kernel_grad.detach())
             if not self._pinverse_use_solver:
-                self._pinverse.update_with_gradient(LossInfo(loss=pinverse_loss))
+                self._pinverse.update_with_gradient(
+                    LossInfo(loss=pinverse_loss))
 
         # construct functional gradient via pinverse
         gen_inputs2_batch = torch.repeat_interleave(
             gen_inputs2, num_particles, dim=0).detach()
         kernel_grad_batch = kernel_grad.reshape(num_particles * num_particles,
                                                 -1).detach()
+        if self._exact_inverse:
+            J_inv = torch.inverse(jac)
+            J_inv_kernel_grad = torch.einsum('ijk, iaj->iak', J_inv,
+                                             kernel_grad)  # [N2, N, D]
+
         if self._pinverse_use_solver:
             J_inv_kernel_grad = self._pinverse
         else:
@@ -1003,9 +1018,9 @@ class Generator(Algorithm):
         grad = kernel_logp - entropy_regularization * J_inv_kernel_grad.mean(0)
         loss_propagated = torch.sum(grad.detach() * outputs, dim=1)
 
-        if self._use_jac_regularization:
-            jac_reg = .001 * jac.norm(keepdim=True).mean()
-            loss_propagated -= jac_reg
+        #if self._use_jac_regularization:
+        #    jac_reg = .001 * jac.norm(keepdim=True).mean()
+        #    loss_propagated -= jac_reg
         return (loss, pinverse_loss), loss_propagated
 
     def _func_critic_train_step(self, inputs, gen_outputs, loss_func):
@@ -1058,7 +1073,7 @@ class Generator(Algorithm):
         assert inputs is None, (
             '``rkhs`` does not support conditional generator')
         outputs, gen_inputs = outputs  # [N, D], [N, D or K]
-        if self._use_jac_regularization:
+        if self._use_jac_regularization or self._exact_inverse:
             outputs, jac = outputs
         num_particles = outputs.shape[0]
 

@@ -32,7 +32,7 @@ FuncParVIAlgorithm.logging_evaluate=True
 
 # training config
 TrainerConfig.algorithm_ctor=@FuncParVIAlgorithm
-TrainerConfig.num_epochs=300
+TrainerConfig.num_epochs=200
 TrainerConfig.num_checkpoints=2
 TrainerConfig.evaluate=True
 TrainerConfig.eval_uncertainty=True
@@ -41,4 +41,5 @@ TrainerConfig.summary_interval=1
 TrainerConfig.debug_summaries=True
 TrainerConfig.summarize_grads_and_vars=True
 TrainerConfig.outlier_dataset='cifar_outlier'
+TrainerConfig.random_seed=None
 

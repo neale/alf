@@ -37,7 +37,6 @@ from alf.utils.summary_utils import record_time
 
 import uncertainty_metrics.numpy as um
 
-
 HyperNetworkLossInfo = namedtuple("HyperNetworkLossInfo", ["loss", "extra"])
 
 
@@ -51,7 +50,7 @@ def classification_loss(output, target):
     if output.ndim == 3:  # function_vi
         output = output.transpose(1, 2)
     else:
-        output = output.reshape(output.shape[0]*target.shape[1], -1)
+        output = output.reshape(output.shape[0] * target.shape[1], -1)
         target = target.reshape(-1)
     if target.ndim == 1:
         target = target.view(-1, 1)
@@ -116,6 +115,7 @@ class HyperNetwork(Algorithm):
                  function_extra_bs_sampler='uniform',
                  function_extra_bs_std=1.,
                  functional_gradient=None,
+                 exact_inverse=False,
                  force_fullrank=True,
                  fullrank_diag_weight=1.0,
                  pinverse_solve_iters=1,
@@ -200,7 +200,7 @@ class HyperNetwork(Algorithm):
         assert parameterization in ['network', 'layer'], "Hypernetwork " \
                 "can only be parameterized by \"network\" or \"layer\" " \
                 "generators"
-        
+
         if parameterization == 'network':
             if functional_gradient:
                 net = ReluMLP(
@@ -261,7 +261,7 @@ class HyperNetwork(Algorithm):
         else:
             critic_input_dim = gen_output_dim
 
-        super().__init__(train_state_spec=(), optimizer=optimizer, name=name) 
+        super().__init__(train_state_spec=(), optimizer=optimizer, name=name)
 
         self._generator = Generator(
             gen_output_dim,
@@ -277,6 +277,7 @@ class HyperNetwork(Algorithm):
             functional_gradient=functional_gradient,
             force_fullrank=force_fullrank,
             fullrank_diag_weight=fullrank_diag_weight,
+            exact_inverse=exact_inverse,
             pinverse_solve_iters=pinverse_solve_iters,
             pinverse_hidden_size=pinverse_hidden_size,
             use_jac_regularization=use_jac_regularization,
@@ -284,7 +285,7 @@ class HyperNetwork(Algorithm):
             pinverse_optimizer=pinverse_optimizer,
             optimizer=None,
             name=name)
-        
+
         self._param_net = param_net
         self._num_particles = num_particles
         self._entropy_regularization = entropy_regularization
@@ -317,20 +318,20 @@ class HyperNetwork(Algorithm):
         self._train_loader = train_loader
         self._test_loader = test_loader
         if self._entropy_regularization is None:
-            self._entropy_regularization = 50/ len(train_loader)
+            self._entropy_regularization = 50 / len(train_loader)
         if outlier is not None:
             assert isinstance(outlier, tuple), "outlier dataset must be " \
                 "provided in the format (outlier_train, outlier_test)"
             self._outlier_train = outlier[0]
             self._outlier_test = outlier[1]
-        else: 
+        else:
             self._outlier_train = self._outlier_test = None
- 
+
     def set_num_particles(self, num_particles):
         """Set the number of particles to sample through one forward
         pass of the hypernetwork. """
         self._num_particles = num_particles
-    
+
     @property
     def num_particles(self):
         return self._num_particles
@@ -362,14 +363,14 @@ class HyperNetwork(Algorithm):
             AlgorithmStep: outputs with shape (batch_size, output_dim)
         """
         if params is None:
-            params = self.sample_parameters(num_particles=num_particles)      
+            params = self.sample_parameters(num_particles=num_particles)
             if self._functional_gradient is not None:
                 if self._generator._use_jac_regularization:
                     params, _ = params
         self._param_net.set_parameters(params)
         outputs, _ = self._param_net(inputs)
         return AlgStep(output=outputs, state=(), info=())
-     
+
     def train_iter(self, num_particles=None, state=None):
         """ Perform a single (iteration) epoch of training"""
         assert self._train_loader is not None, "Must set data_loader first"
@@ -425,7 +426,7 @@ class HyperNetwork(Algorithm):
             num_particles = self._num_particles
         if entropy_regularization is None:
             entropy_regularization = self._entropy_regularization
-        
+
         if self._function_vi:
             data, target = inputs
             return self._generator.train_step(
@@ -444,7 +445,7 @@ class HyperNetwork(Algorithm):
                 batch_size=num_particles,
                 entropy_regularization=entropy_regularization,
                 state=())
-    
+
     def _function_transform(self, data, params):
         """
         Transform the generator outputs to its corresponding function values
@@ -573,7 +574,7 @@ class HyperNetwork(Algorithm):
         entropy = entropy_fn(probs.T.cpu().detach().numpy())
         with torch.no_grad():
             outputs_outlier, _ = self._predict_dataset(self._outlier_test,
-                                                      num_particles)
+                                                       num_particles)
         probs_outlier = F.softmax(outputs_outlier.mean(0), -1)
         entropy_outlier = entropy_fn(probs_outlier.T.cpu().detach().numpy())
         auroc_entropy = self._auc_score(entropy, entropy_outlier)
@@ -585,7 +586,8 @@ class HyperNetwork(Algorithm):
         import csv
         with open('aucece.csv', 'a') as f:
             writer = csv.writer(f, delimiter=',')
-            writer.writerow([str(num_particles), auroc_entropy, ece_score, '\n'])
+            writer.writerow(
+                [str(num_particles), auroc_entropy, ece_score, '\n'])
 
     def _classification_vote(self, output, target):
         """ensmeble the ooutputs from sampled classifiers."""
@@ -638,7 +640,7 @@ class HyperNetwork(Algorithm):
         y_true = np.array([0] * len(inliers) + [1] * len(outliers))
         y_score = np.concatenate([inliers, outliers])
         return roc_auc_score(y_true, y_score)
-    
+
     def _ece_score(self, probs, labels, bins=15):
         labels = labels.cpu().numpy()
         probs = probs.detach().cpu().numpy()
@@ -679,7 +681,11 @@ class HyperNetwork(Algorithm):
         model_outputs = torch.cat(outputs, dim=1)  # [N, B, D]
         return model_outputs, torch.cat(targets, -1).view(-1)
 
-    def summarize_train(self, loss_info, params, cum_loss=None, avg_acc=None,
+    def summarize_train(self,
+                        loss_info,
+                        params,
+                        cum_loss=None,
+                        avg_acc=None,
                         auroc=None):
         """Generate summaries for training & loss info after each gradient update.
         The default implementation of this function only summarizes params
