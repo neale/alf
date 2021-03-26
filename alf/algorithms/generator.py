@@ -170,6 +170,7 @@ class PinverseAlgorithm(Algorithm):
                  output_dim,
                  eps_dim=None,
                  hidden_size=500,
+                 block_pinverse=False,
                  net: Network = None,
                  optimizer=None,
                  name="PinverseAlgorithm"):
@@ -207,6 +208,7 @@ class PinverseAlgorithm(Algorithm):
                 input_tensor_spec,
                 output_dim,
                 hidden_size,
+                block_pinverse=block_pinverse,
                 name='PinverseNetwork')
         self._net = net
 
@@ -299,6 +301,7 @@ class Generator(Algorithm):
                  fullrank_diag_weight=1.0,
                  pinverse_solve_iters=1,
                  pinverse_hidden_size=100,
+                 block_pinverse=False,
                  critic_input_dim=None,
                  critic_hidden_layers=(100, 100),
                  critic_l2_weight=10.,
@@ -449,7 +452,7 @@ class Generator(Algorithm):
                 self._force_fullrank = force_fullrank
                 self._fullrank_diag_weight = fullrank_diag_weight
                 self._pinverse_solve_iters = pinverse_solve_iters
-
+                self._block_pinverse = block_pinverse
                 if pinverse_optimizer is None:
                     pinverse_optimizer = alf.optimizers.Adam(
                         lr=1e-4, weight_decay=1e-5)
@@ -459,6 +462,7 @@ class Generator(Algorithm):
                     output_dim,
                     eps_dim=self._eps_dim,
                     hidden_size=pinverse_hidden_size,
+                    block_pinverse=block_pinverse,
                     optimizer=pinverse_optimizer)
 
             self._kernel_width_averager = AdaptiveAverager(
@@ -868,6 +872,27 @@ class Generator(Algorithm):
 
         return loss, loss_propagated
 
+    def _compute_block_pinverse(self, z_inputs, eps_inputs):
+        """
+        My main concern is a jvp every time we do inference
+        """
+        # make z into k dim (might not be true for inference)
+        z_inputs = z_inputs[:, :self._noise_dim]
+        # get V1 from eps
+        eps_inputs_k = eps_inputs[:, :self._noise_dim]
+        # compute (A + \lambdaI)^{-1}V1
+        A_block = self._pinverse.predict_step((z_inputs, eps_inputs_k)).output
+        # compute B(A + \lambdaI)^{-1}V1
+        jvp_B, _ = self._net.compute_jvp_partial(
+            z_inputs, A_block.t(), partial_idx=1)
+        diag_weight = 1. / self._fullrank_diag_weight
+        # compute B(A + \lambdaI)^{-1}V1 + 1/\lambdaI V2
+        v2 = diag_weight * eps_inputs[:, self._noise_dim:]
+        B_block = -self._fullrank_diag_weight * jvp_B.t() + v2
+        # concat for J = [A, B]
+        j_ab = torch.cat([A_block, B_block], dim=-1)
+        return j_ab
+
     def _pinverse_train_step(self, z, eps=None):
         r"""Compute the loss for pinverse training. 
         self._pinverse solves an inverse problem for the amortized 
@@ -902,16 +927,28 @@ class Generator(Algorithm):
                 z_inputs, eps.shape[1], dim=0)  # [N2*N, K]
             eps_inputs = eps.reshape(eps.shape[0] * eps.shape[1],
                                      -1)  # [N2*N, D or K]
-            y = self._pinverse.predict_step((z_inputs, eps_inputs)).output
-            # [N2*N, D]
-            jac_y, _ = self._net.compute_vjp(z_inputs, y)  # [N2*N, K]
-            if self._force_fullrank:
+            if self._block_pinverse:
+                jg = self._compute_block_pinverse(z_inputs, eps_inputs)
+                jac_y, _ = self._net.compute_vjp_partial(
+                    z_inputs, jg, partial_idx=-1)
                 jac_y = torch.cat(
                     (jac_y,
                      torch.zeros(jac_y.shape[0],
                                  self._output_dim - self._noise_dim)),
                     dim=-1)
-                jac_y += self._fullrank_diag_weight * y  # [N2*N, D]
+                jac_y += self._fullrank_diag_weight * jg  # [N2*N, D]
+
+            else:
+                y = self._pinverse.predict_step((z_inputs, eps_inputs)).output
+                # [N2*N, D]
+                jac_y, _ = self._net.compute_vjp(z_inputs, y)  # [N2*N, K]
+                if self._force_fullrank:
+                    jac_y = torch.cat(
+                        (jac_y,
+                         torch.zeros(jac_y.shape[0],
+                                     self._output_dim - self._noise_dim)),
+                        dim=-1)
+                    jac_y += self._fullrank_diag_weight * y  # [N2*N, D]
             jac_y = jac_y.reshape(z.shape[0], eps.shape[1],
                                   -1)  # [N2, N, D or K]
             loss = torch.nn.functional.mse_loss(jac_y, eps)
@@ -974,8 +1011,12 @@ class Generator(Algorithm):
             gen_inputs2, num_particles, dim=0).detach()
         kernel_grad_batch = kernel_grad.reshape(num_particles * num_particles,
                                                 -1).detach()
-        J_inv_kernel_grad = self._pinverse.predict_step(
-            (gen_inputs2_batch, kernel_grad_batch)).output  # [N2*N, D]
+        if self._block_pinverse:
+            J_inv_kernel_grad = self._compute_block_pinverse(
+                gen_inputs2_batch, kernel_grad_batch)  # [N2*N, D]
+        else:
+            J_inv_kernel_grad = self._pinverse.predict_step(
+                (gen_inputs2_batch, kernel_grad_batch)).output  # [N2*N, D]
         J_inv_kernel_grad = J_inv_kernel_grad.reshape(
             num_particles, num_particles, -1)  # [N2, N, D]
 
@@ -990,7 +1031,6 @@ class Generator(Algorithm):
 
         grad = kernel_logp - entropy_regularization * J_inv_kernel_grad.mean(0)
         loss_propagated = torch.sum(grad.detach() * outputs, dim=1)
-
         return (loss, pinverse_loss), loss_propagated
 
     def _func_critic_train_step(self, inputs, gen_outputs, loss_func):

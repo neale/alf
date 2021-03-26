@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import os
 import absl
 from absl.testing import parameterized
 import numpy as np
@@ -24,6 +25,28 @@ from alf.algorithms.hypernetwork_algorithm import HyperNetwork
 from alf.tensor_specs import TensorSpec
 from alf.utils import math_ops
 from alf.utils.datagen import load_nclass_test
+import matplotlib.pyplot as plt
+
+
+def plot_classification(i, algorithm, n_classes, data, tag=''):
+    basedir = '/home/neale/repos/alf-plots/gpvi/classification/{}/'.format(tag)
+    print(basedir)
+    os.makedirs(basedir, exist_ok=True)
+    x = torch.linspace(-12, 12, 100)
+    y = torch.linspace(-12, 12, 100)
+    gridx, gridy = torch.meshgrid(x, y)
+    grid = torch.stack((gridx.reshape(-1), gridy.reshape(-1)), -1)
+    outputs = algorithm.predict_step(grid, num_particles=100).output.cpu()
+    outputs = F.softmax(outputs, -1).detach()  # [B, D]
+    std_outputs = outputs.std(1).cpu()
+    conf_std = std_outputs.max(-1)[0] * 1.94
+    p1 = plt.scatter(
+        grid[:, 0].cpu(), grid[:, 1].cpu(), c=conf_std, cmap='rainbow')
+    p2 = plt.scatter(data[:, 0].cpu(), data[:, 1].cpu(), c='black', alpha=0.1)
+    cbar = plt.colorbar(p1)
+    cbar.set_label("confidance (std)")
+    plt.savefig(basedir + 'std-map_{}.png'.format(i))
+    plt.close('all')
 
 
 class HyperNetworkClassificationTest(parameterized.TestCase,
@@ -39,20 +62,30 @@ class HyperNetworkClassificationTest(parameterized.TestCase,
     """
 
     @parameterized.parameters(
-        ('svgd2', False, None),
-        ('svgd3', False, None),
-        ('gfsf', False, None),
-        ('minmax', False, None),
-        ('svgd2', True, None),
-        ('svgd3', True, None),
-        ('gfsf', True, None),
-        ('svgd3', False, 'rkhs'),
-        ('minmax', False, 'minmax'),
+        #('svgd2', False, None),
+        #('svgd3', False, None),
+        #('gfsf', False, None),
+        #('minmax', False, None),
+        #('svgd2', True, None),
+        #('svgd3', True, None),
+        #('gfsf', True, None),
+        ('svgd3', False, 'rkhs', 32, 32, 24),
+        ('svgd3', False, 'rkhs', 32, 32, 32),
+        ('svgd3', False, 'rkhs', 32, 32, 16),
+        ('svgd3', False, 'rkhs', 32, 32, 64),
+        ('svgd3', False, 'rkhs', 64, 64, 24),
+        ('svgd3', False, 'rkhs', 64, 64, 32),
+        ('svgd3', False, 'rkhs', 64, 64, 16),
+        ('svgd3', False, 'rkhs', 64, 64, 64),
+        #('minmax', False, 'minmax'),
     )
     def test_classification_hypernetwork(self,
                                          par_vi='svgd3',
                                          function_vi=False,
                                          functional_gradient='rkhs',
+                                         noise_dim=16,
+                                         hidden_size=16,
+                                         pinverse_hidden_size=16,
                                          num_classes=2,
                                          num_particles=100):
         """
@@ -78,9 +111,10 @@ class HyperNetworkClassificationTest(parameterized.TestCase,
         test_inputs = test_loader.dataset.get_features()
         test_targets = test_loader.dataset.get_targets()
 
-        noise_dim = 64
-        hidden_size = 64
-        lr = 1e-2
+        #noise_dim = 32
+        #hidden_size = 32
+        #pinverse_hidden_size = pinverse
+        lr = 1e-3
         config = TrainerConfig(root_dir='dummy')
         algorithm = HyperNetwork(
             input_tensor_spec=input_spec,
@@ -88,19 +122,22 @@ class HyperNetworkClassificationTest(parameterized.TestCase,
             last_layer_param=(output_dim, True),
             last_activation=math_ops.identity,
             noise_dim=noise_dim,
-            hidden_layers=(hidden_size, hidden_size),
+            hidden_layers=(hidden_size, ),  # hidden_size),
             num_particles=num_particles,
             loss_type='classification',
             par_vi=par_vi,
             function_vi=function_vi,
             function_bs=train_batch_size,
             functional_gradient=functional_gradient,
-            pinverse_hidden_size=100,
+            block_pinverse=True,
+            force_fullrank=True,
+            pinverse_hidden_size=pinverse_hidden_size,
             critic_hidden_layers=(hidden_size, hidden_size),
             critic_iter_num=5,
             optimizer=alf.optimizers.Adam(lr=lr),
             critic_optimizer=alf.optimizers.Adam(lr=lr),
-            pinverse_optimizer=alf.optimizers.Adam(lr=1e-3),
+            pinverse_optimizer=alf.optimizers.Adam(lr=1e-4),
+            #logging_training=True,
             config=config)
 
         algorithm.set_data_loader(
@@ -131,8 +168,10 @@ class HyperNetworkClassificationTest(parameterized.TestCase,
             absl.logging.info('mean particle acc: {}'.format(mean_acc.item()))
             absl.logging.info('all particles acc: {}'.format(
                 sample_acc.item()))
+            tag = f'gpvi_block_z{noise_dim}_h{hidden_size}_lr{lr}_p{pinverse_hidden_size}_1hl'
+            plot_classification(i, algorithm, num_classes, test_inputs, tag)
 
-        train_iter = 1001
+        train_iter = 100000
         for i in range(train_iter):
             algorithm.train_iter()
             if i % 1000 == 0:

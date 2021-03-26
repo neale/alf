@@ -187,6 +187,7 @@ class HyperNetwork(Algorithm):
                  function_extra_bs_sampler='uniform',
                  function_extra_bs_std=1.,
                  functional_gradient=None,
+                 block_pinverse=False,
                  force_fullrank=True,
                  fullrank_diag_weight=1.0,
                  pinverse_solve_iters=1,
@@ -301,9 +302,14 @@ class HyperNetwork(Algorithm):
         noise_spec = TensorSpec(shape=(noise_dim, ))
 
         if functional_gradient:
+            if block_pinverse:
+                head_size = (noise_dim, gen_output_dim - noise_dim)
+            else:
+                head_size = None
             net = ReluMLP(
                 noise_spec,
                 hidden_layers=hidden_layers,
+                head_size=head_size,
                 output_size=gen_output_dim,
                 name='Generator')
         else:
@@ -356,6 +362,7 @@ class HyperNetwork(Algorithm):
             critic_iter_num=critic_iter_num,
             critic_l2_weight=critic_l2_weight,
             functional_gradient=functional_gradient,
+            block_pinverse=block_pinverse,
             force_fullrank=force_fullrank,
             fullrank_diag_weight=fullrank_diag_weight,
             pinverse_solve_iters=pinverse_solve_iters,
@@ -504,6 +511,8 @@ class HyperNetwork(Algorithm):
             if self._loss_type == 'classification':
                 logging.info("Avg acc: {}".format(acc))
             if pinverse_loss > 0.:
+                if batch_idx == 0:
+                    batch_idx = 1
                 pinverse_loss = pinverse_loss / batch_idx
                 logging.info("Avg pinverse loss: {}".format(pinverse_loss))
             logging.info("Cum loss: {}".format(loss))

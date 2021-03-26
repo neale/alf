@@ -38,6 +38,7 @@ class PinverseNetwork(Network):
                  input_tensor_spec,
                  output_dim,
                  hidden_size,
+                 block_pinverse=False,
                  joint_fc_layer_params=None,
                  activation=torch.relu_,
                  kernel_initializer=None,
@@ -66,6 +67,9 @@ class PinverseNetwork(Network):
             z_spec, eps_spec = input_tensor_spec
             self._z_dim = z_spec.shape[0]
             self._eps_dim = eps_spec.shape[0]
+            if block_pinverse:
+                self._eps_dim = self._z_dim
+                output_dim = self._z_dim
             assert self._eps_dim == output_dim or self._eps_dim == self._z_dim, (
                 "eps_dim must match either z_dim or output_dim!")
         else:
@@ -134,7 +138,7 @@ class PinverseNetwork(Network):
         else:
             z, eps = inputs
             assert eps.ndim == 2 and eps.shape[-1] == self._eps_dim, (
-                "the input eps has wrong shape!")
+                "the input eps has wrong shape! {}".format(eps.ndim))
             assert z.shape[0] == eps.shape[0], (
                 "batch sizes of input z and eps do not match!")
         assert z.ndim == 2 and z.shape[-1] >= self._z_dim, (

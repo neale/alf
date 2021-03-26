@@ -37,6 +37,19 @@ def jacobian(y, x, create_graph=False):
     return torch.stack(jac).reshape(y.shape + x.shape)
 
 
+def jvp_autograd(x, y, v):
+    """ Double backward jvp trick from:
+  https://j-towns.github.io/2017/06/12/A-new-trick.html
+  """
+    grad_y = torch.zeros_like(y, requires_grad=True)
+    dy = torch.autograd.grad(y, x, grad_outputs=grad_y, create_graph=True)
+    dyT = dy[0].transpose(1, 0)
+    jvpT = torch.autograd.grad(dyT, grad_y, grad_outputs=v, retain_graph=True)
+    jvp = jvpT[0].transpose(1, 0)
+
+    return jvp
+
+
 class ReluMLPTest(parameterized.TestCase, alf.test.TestCase):
     def assertArrayEqual(self, x, y, eps):
         self.assertEqual(x.shape, y.shape)
@@ -127,13 +140,42 @@ class ReluMLPTest(parameterized.TestCase, alf.test.TestCase):
         vec = torch.randn(batch_size, output_size)
         x1 = x.detach().clone()
         x1.requires_grad = True
-        vjp = mlp.compute_vjp(x1, vec)
+        vjp, _ = mlp.compute_vjp(x1, vec)
 
         # # compute jac using autograd
         y, _ = mlp(x)
         vjp2 = torch.autograd.grad(y, x, grad_outputs=vec)[0]
 
         self.assertArrayEqual(vjp, vjp2, 1e-6)
+
+    @parameterized.parameters(
+        dict(hidden_layers=(2, )),
+        dict(hidden_layers=(2, 3), batch_size=1),
+        dict(hidden_layers=(2, 3, 4)),
+    )
+    def test_compute_jvp(self, hidden_layers=(2, ), batch_size=2,
+                         input_size=5):
+        """
+        Check that the vector-Jacobian product computed by the direct(autograd-free)
+        approach is consistent with the one computed by calling autograd.
+        """
+        output_size = 4
+        spec = TensorSpec((input_size, ))
+        mlp = ReluMLP(
+            spec, output_size=output_size, hidden_layers=hidden_layers)
+
+        # compute vjp using direct approach
+        x = torch.randn(batch_size, input_size, requires_grad=True)
+        vec = torch.randn(batch_size, input_size, requires_grad=True).t()
+        x1 = x.detach().clone()
+        x1.requires_grad = True
+        jvp, _ = mlp.compute_jvp(x1, vec)
+
+        # # compute jac using autograd
+        y, _ = mlp(x)
+        jvp2 = jvp_autograd(x, y, vec)
+
+        self.assertArrayEqual(jvp, jvp2, 1e-6)
 
 
 if __name__ == "__main__":
