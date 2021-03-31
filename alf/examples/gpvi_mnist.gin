@@ -9,26 +9,28 @@ create_dataset.test_batch_size=100
 # Lenet for MNIST
 CONV_LAYER_PARAMS = ((6, 5, 1, 2, 2), (16, 5, 1, 0, 2), (120, 5, 1))
 FC_LAYER_PARAMS = ((84, True), )
-HIDDEN_LAYERS = (512, 1024)
+HIDDEN_LAYERS = (256, 512, 1024)
 
-hypernet/Adam.lr = 1e-5
-hypernet/Adam.weight_decay = 0 
+hypernet/Adam.lr = 1e-3
+hypernet/Adam.weight_decay = 1e-4
 hypernet_pinverse/Adam.lr = 1e-4
 
 # algorithm config
 HyperNetwork.conv_layer_params = %CONV_LAYER_PARAMS
 HyperNetwork.fc_layer_params = %FC_LAYER_PARAMS
 HyperNetwork.hidden_layers = %HIDDEN_LAYERS
-HyperNetwork.noise_dim = 512
+HyperNetwork.noise_dim = 128
 HyperNetwork.num_particles = 10
 
 HyperNetwork.use_fc_bn = True
 HyperNetwork.par_vi = 'svgd3'
 HyperNetwork.functional_gradient='rkhs'
 HyperNetwork.loss_type = 'classification'
-HyperNetwork.entropy_regularization = 1e-5
-HyperNetwork.force_fullrank=False
-HyperNetwork.pinverse_hidden_size=256
+HyperNetwork.entropy_regularization = 1.
+HyperNetwork.force_fullrank=True
+HyperNetwork.block_pinverse=True
+HyperNetwork.pinverse_hidden_size=128
+HyperNetwork.pinverse_solve_iters=5
 HyperNetwork.optimizer = @hypernet/Adam()
 HyperNetwork.pinverse_optimizer = @hypernet_pinverse/Adam()
                
@@ -51,4 +53,4 @@ TrainerConfig.summarize_grads_and_vars=True
 TrainerConfig.hold_out_dataset = 'mnist'
 TrainerConfig.train_classes = [0, 1, 2, 3, 4, 5]
 TrainerConfig.hold_out_classes = [6, 7, 8, 9]
-TrainerConfig.random_seed = 123344
+TrainerConfig.random_seed = None

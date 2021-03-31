@@ -42,6 +42,8 @@ class ImageEncodingNetwork(Network):
                  conv_layer_params,
                  same_padding=False,
                  activation=torch.relu_,
+                 use_conv_bn=False,
+                 last_conv_bn=False,
                  kernel_initializer=None,
                  flatten_output=False,
                  name="ImageEncodingNetwork"):
@@ -93,19 +95,22 @@ class ImageEncodingNetwork(Network):
         self._flatten_output = flatten_output
         self._conv_layer_params = conv_layer_params
         self._conv_layers = nn.ModuleList()
-        for paras in conv_layer_params:
-            filters, kernel_size, strides = paras[:3]
-            padding = paras[3] if len(paras) > 3 else 0
+        for i, params in enumerate(conv_layer_params):
+            filters, kernel_size, strides = params[:3]
+            padding = params[3] if len(params) > 3 else 0
             if same_padding:  # overwrite paddings
                 kernel_size = common.tuplify2d(kernel_size)
                 padding = ((kernel_size[0] - 1) // 2,
                            (kernel_size[1] - 1) // 2)
+            if i == (len(conv_layer_params) - 1):
+                use_conv_bn = last_conv_bn
             self._conv_layers.append(
                 layers.Conv2D(
                     input_channels,
                     filters,
                     kernel_size,
                     activation=activation,
+                    use_bn=use_conv_bn,
                     kernel_initializer=kernel_initializer,
                     strides=strides,
                     padding=padding))
@@ -168,9 +173,9 @@ class ParallelImageEncodingNetwork(Network):
         self._flatten_output = flatten_output
         self._conv_layer_params = conv_layer_params
         self._conv_layers = nn.ModuleList()
-        for paras in conv_layer_params:
-            filters, kernel_size, strides = paras[:3]
-            padding = paras[3] if len(paras) > 3 else 0
+        for params in conv_layer_params:
+            filters, kernel_size, strides = params[:3]
+            padding = params[3] if len(params) > 3 else 0
             if same_padding:  # overwrite paddings
                 kernel_size = common.tuplify2d(kernel_size)
                 padding = ((kernel_size[0] - 1) // 2,
@@ -234,6 +239,8 @@ class ImageDecodingNetwork(Network):
                  same_padding=False,
                  preprocess_fc_layer_params=None,
                  activation=torch.relu_,
+                 use_conv_bn=False,
+                 last_conv_bn=False,
                  kernel_initializer=None,
                  output_activation=torch.tanh,
                  name="ImageDecodingNetwork"):
@@ -319,9 +326,9 @@ class ImageDecodingNetwork(Network):
         self._transconv_layer_params = transconv_layer_params
         self._transconv_layers = nn.ModuleList()
         in_channels = start_decoding_channels
-        for i, paras in enumerate(transconv_layer_params):
-            filters, kernel_size, strides = paras[:3]
-            padding = paras[3] if len(paras) > 3 else 0
+        for i, params in enumerate(transconv_layer_params):
+            filters, kernel_size, strides = params[:3]
+            padding = params[3] if len(params) > 3 else 0
             if same_padding:  # overwrite paddings
                 kernel_size = common.tuplify2d(kernel_size)
                 padding = ((kernel_size[0] - 1) // 2,
@@ -329,12 +336,14 @@ class ImageDecodingNetwork(Network):
             act = activation
             if i == len(transconv_layer_params) - 1:
                 act = output_activation
+                use_conv_bn = last_conv_bn
             self._transconv_layers.append(
                 layers.ConvTranspose2D(
                     in_channels,
                     filters,
                     kernel_size,
                     activation=act,
+                    use_bn=use_conv_bn,
                     kernel_initializer=kernel_initializer,
                     strides=strides,
                     padding=padding))
@@ -437,9 +446,9 @@ class ParallelImageDecodingNetwork(Network):
         self._transconv_layer_params = transconv_layer_params
         self._transconv_layers = nn.ModuleList()
         in_channels = start_decoding_channels
-        for i, paras in enumerate(transconv_layer_params):
-            filters, kernel_size, strides = paras[:3]
-            padding = paras[3] if len(paras) > 3 else 0
+        for i, params in enumerate(transconv_layer_params):
+            filters, kernel_size, strides = params[:3]
+            padding = params[3] if len(params) > 3 else 0
             if same_padding:  # overwrite paddings
                 kernel_size = common.tuplify2d(kernel_size)
                 padding = ((kernel_size[0] - 1) // 2,
@@ -507,6 +516,8 @@ class EncodingNetwork(PreprocessorNetwork):
                  activation=torch.relu_,
                  kernel_initializer=None,
                  use_fc_bn=False,
+                 use_conv_bn=False,
+                 last_conv_bn=False,
                  last_layer_size=None,
                  last_activation=None,
                  last_kernel_initializer=None,
@@ -592,6 +603,8 @@ class EncodingNetwork(PreprocessorNetwork):
                 input_channels, (height, width),
                 conv_layer_params,
                 activation=activation,
+                use_conv_bn=use_conv_bn,
+                last_conv_bn=last_conv_bn,
                 kernel_initializer=kernel_initializer,
                 flatten_output=True)
             input_size = self._img_encoding_net.output_spec.shape[0]

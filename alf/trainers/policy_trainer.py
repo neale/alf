@@ -46,7 +46,9 @@ from alf.utils.video_recorder import VideoRecorder
 def create_dataset(dataset_name='mnist',
                    dataset_loader=datagen,
                    train_batch_size=100,
-                   test_batch_size=100):
+                   test_batch_size=100,
+                   scale=None,
+                   normalize=True):
     """Create a pytorch data loaders.
 
     Args:
@@ -64,7 +66,9 @@ def create_dataset(dataset_name='mnist',
     trainset, testset = getattr(dataset_loader,
                                 'load_{}'.format(dataset_name))(
                                     train_bs=train_batch_size,
-                                    test_bs=test_batch_size)
+                                    test_bs=test_batch_size,
+                                    scale=scale,
+                                    normalize=normalize)
     return trainset, testset
 
 

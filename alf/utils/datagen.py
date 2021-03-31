@@ -16,7 +16,8 @@ Adapted from the following:
 
 https://github.com/neale/HyperGAN/blob/master/datagen.py
 """
-
+import numpy as np
+import random
 import torch
 import torchvision
 from torchvision import datasets, transforms
@@ -144,6 +145,42 @@ class TestNClassDataSet(torch.utils.data.Dataset):
         return self._labels
 
 
+class Test8GaussiansDataSet(torch.utils.data.Dataset):
+    def __init__(self, size=10000):
+        scale = 2.
+        centers = [((1, 0), 0), ((-1, 0), 1), ((0, 1), 2), ((0, -1), 3),
+                   ((1. / np.sqrt(2), 1. / np.sqrt(2)), 4),
+                   ((1. / np.sqrt(2), -1. / np.sqrt(2)), 5),
+                   ((-1. / np.sqrt(2), 1. / np.sqrt(2)), 6),
+                   ((-1. / np.sqrt(2), -1. / np.sqrt(2)), 7)]
+        centers = [((scale * x[0], scale * x[1]), y) for x, y in centers]
+        samples = []
+        labels = []
+        for _ in range(size):
+            point = np.random.randn(2) * .02
+            center, label = random.choice(centers)
+            point[0] += center[0]
+            point[1] += center[1]
+            samples.append(point)
+            labels.append(label)
+        samples = torch.tensor(samples)
+        samples /= 1.414  # stdev
+        self._features = samples.float()
+        self._labels = torch.tensor(labels).long()
+
+    def __getitem__(self, index):
+        return self._features[index], self._labels[index]
+
+    def __len__(self):
+        return len(self._features)
+
+    def get_features(self):
+        return self._features
+
+    def get_targets(self):
+        return self._labels
+
+
 def load_nclass_test(num_classes,
                      train_size,
                      test_size,
@@ -192,7 +229,12 @@ def get_classes(target, labels):
     return label_indices
 
 
-def load_mnist(label_idx=None, train_bs=100, test_bs=100, num_workers=0):
+def load_mnist(label_idx=None,
+               train_bs=100,
+               test_bs=100,
+               num_workers=0,
+               scale=None,
+               normalize=True):
     """ Loads the MNIST dataset. 
     
     Args:
@@ -213,9 +255,16 @@ def load_mnist(label_idx=None, train_bs=100, test_bs=100, num_workers=0):
     }
     path = 'data_m/'
 
+    if scale is None:
+        scale = 28
+    if normalize:
+        normalize = transforms.Normalize((0.1307, ), (0.3081, ))
+    else:
+        normalize = transforms.Normalize((0, ), (1, ))
+
     data_transform = transforms.Compose(
-        [transforms.ToTensor(),
-         transforms.Normalize((0.1307, ), (0.3081, ))])
+        [transforms.Resize(scale),
+         transforms.ToTensor(), normalize])
 
     trainset = datasets.MNIST(
         root=path, train=False, download=True, transform=data_transform)
@@ -233,7 +282,12 @@ def load_mnist(label_idx=None, train_bs=100, test_bs=100, num_workers=0):
     return train_loader, test_loader
 
 
-def load_cifar10(label_idx=None, train_bs=100, test_bs=100, num_workers=0):
+def load_cifar10(label_idx=None,
+                 train_bs=100,
+                 test_bs=100,
+                 num_workers=0,
+                 scale=None,
+                 normalize=True):
     """ Loads the CIFAR-10 dataset.
 
     Args:
@@ -253,11 +307,17 @@ def load_cifar10(label_idx=None, train_bs=100, test_bs=100, num_workers=0):
     }
     path = 'data_c10/'
 
-    data_transform = transforms.Compose([
-        transforms.ToTensor(),
+    if scale is None:
+        scale = 32
+    if normalize:
         transforms.Normalize((0.4914, 0.4822, 0.4465),
                              (0.2023, 0.1994, 0.2010))
-    ])
+    else:
+        normalize = transforms.Normalize((0, 0, 0), (1, 1, 1))
+
+    data_transform = transforms.Compose(
+        [transforms.Resize(scale),
+         transforms.ToTensor(), normalize])
 
     trainset = datasets.CIFAR10(
         root=path, train=True, download=True, transform=data_transform)

@@ -293,7 +293,7 @@ class ReluMLP(Network):
         else:
             weight = self._heads[partial_idx].weight
         J = torch.matmul(vec, weight)
-        for fc in reversed(self._fc_layers[0:-1]):
+        for fc in reversed(self._fc_layers[0:]):
             mask = (fc.hidden_neurons > 0).float()
             J = torch.matmul(J * mask, fc.weight)
 
@@ -397,12 +397,15 @@ class ReluMLP(Network):
         mask = (self._fc_layers[0].hidden_neurons > 0).float()
         J = torch.matmul(self._fc_layers[0].weight, vec)
         J = J * mask.t()
-
-        for fc in self._fc_layers[1:-1]:
+        for fc in self._fc_layers[1:]:
             mask = (fc.hidden_neurons > 0).float()
             J = torch.matmul(fc.weight, J)
             J = J * mask.t()
-        J = torch.matmul(self._heads[partial_idx].weight, J)
+        if partial_idx == -1:
+            weight = torch.cat([f.weight for f in self._heads], dim=0)
+        else:
+            weight = self._heads[partial_idx].weight
+        J = torch.matmul(weight, J)
 
         if ndim == 1:
             J = J.squeeze(0)

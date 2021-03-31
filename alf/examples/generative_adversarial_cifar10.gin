@@ -1,0 +1,46 @@
+import torch
+import alf.algorithms.generative_adversarial_algorithm
+
+GENERATOR_CONV_PARAMS=((512, 4, 2, 1), (256, 4, 2, 1), (128, 4, 2, 1), (3, 4, 2, 1))
+CRITIC_CONV_PARAMS=((128, 4, 2, 1), (256, 4, 2, 1), (512, 4, 2, 1), (1024, 4, 2, 1))
+
+# dataset config
+create_dataset.dataset_name='cifar10'
+create_dataset.train_batch_size=100
+create_dataset.test_batch_size=100
+create_dataset.scale=32
+create_dataset.normalize=False
+
+gan/Adam.lr=1e-4
+gan/Adam.weight_decay=1e-4
+
+gan_critic/Adam.lr=1e-4
+gan_critic/Adam.weight_decay=1e-4
+
+# algorithm config
+GenerativeAdversarialAlgorithm.noise_dim=128
+GenerativeAdversarialAlgorithm.activation=torch.nn.functional.relu
+GenerativeAdversarialAlgorithm.conv_layer_params=%GENERATOR_CONV_PARAMS
+GenerativeAdversarialAlgorithm.critic_conv_layer_params=%CRITIC_CONV_PARAMS
+# GenerativeAdversarialAlgorithm.last_activation=None
+GenerativeAdversarialAlgorithm.critic_iter_num=5
+GenerativeAdversarialAlgorithm.grad_lambda = 10.
+GenerativeAdversarialAlgorithm.critic_weight_clip=0.
+GenerativeAdversarialAlgorithm.use_bn=True
+GenerativeAdversarialAlgorithm.use_critic_bn=False
+
+GenerativeAdversarialAlgorithm.optimizer=@gan/Adam()
+GenerativeAdversarialAlgorithm.critic_optimizer=@gan_critic/Adam()
+GenerativeAdversarialAlgorithm.logging_training=True
+GenerativeAdversarialAlgorithm.logging_evaluate=True
+GenerativeAdversarialAlgorithm.logging_network=True
+
+# training config
+TrainerConfig.algorithm_ctor=@GenerativeAdversarialAlgorithm
+TrainerConfig.num_iterations=1000
+TrainerConfig.num_checkpoints=1
+TrainerConfig.evaluate=True
+TrainerConfig.eval_interval=1
+TrainerConfig.summary_interval=1
+TrainerConfig.debug_summaries=True
+TrainerConfig.summarize_grads_and_vars=True

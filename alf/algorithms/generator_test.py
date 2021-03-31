@@ -31,8 +31,8 @@ class Net(Network):
             input_tensor_spec=TensorSpec(shape=(dim, )), name="Net")
 
         self.fc = nn.Linear(3, dim, bias=False)
-        w = torch.tensor([[1, 2], [-1, 1], [1, 1]], dtype=torch.float32)
-        self.fc.weight = nn.Parameter(w.t())
+        #w = torch.tensor([[1, 2], [-1, 1], [1, 1]], dtype=torch.float32)
+        #self.fc.weight = nn.Parameter(w.t())
 
     def forward(self, input, state=()):
         return self.fc(input), ()
@@ -63,21 +63,21 @@ class GeneratorTest(parameterized.TestCase, alf.test.TestCase):
         self.assertLessEqual(float(torch.max(abs(x - y))), eps)
 
     @parameterized.parameters(
-        dict(entropy_regularization=1.0, par_vi='gfsf'),
-        dict(entropy_regularization=1.0, par_vi='svgd'),
-        dict(entropy_regularization=1.0, par_vi='svgd2'),
+        #dict(entropy_regularization=1.0, par_vi='gfsf'),
+        #dict(entropy_regularization=1.0, par_vi='svgd'),
+        #dict(entropy_regularization=1.0, par_vi='svgd2'),
         dict(entropy_regularization=1.0, par_vi='svgd3'),
-        dict(entropy_regularization=1.0, par_vi='minmax'),
+        #dict(entropy_regularization=1.0, par_vi='minmax'),
         dict(
             entropy_regularization=1.0,
             par_vi='svgd',
             functional_gradient='rkhs'),
-        dict(
-            entropy_regularization=1.0,
-            par_vi='minmax',
-            functional_gradient='minmax'),
-        dict(entropy_regularization=0.0),
-        dict(entropy_regularization=0.0, mi_weight=1),
+        #dict(
+        #    entropy_regularization=1.0,
+        #    par_vi='minmax',
+        #    functional_gradient='minmax'),
+        #dict(entropy_regularization=0.0),
+        #dict(entropy_regularization=0.0, mi_weight=1),
     )
     def test_generator_unconditional(self,
                                      entropy_regularization=1.0,
@@ -92,14 +92,14 @@ class GeneratorTest(parameterized.TestCase, alf.test.TestCase):
         """
         logging.info("entropy_regularization: %s par_vi: %s mi_weight: %s" %
                      (entropy_regularization, par_vi, mi_weight))
-        dim = 2
+        dim = 5
         batch_size = 64
         hidden_size = 10
         if functional_gradient is not None:
             input_dim = TensorSpec((3, ))
             net = ReluMLP(input_dim, hidden_layers=(), output_size=dim)
-            w = torch.tensor([[1, 2], [-1, 1], [1, 1]], dtype=torch.float32)
-            net._fc_layers[0].weight = nn.Parameter(w.t())
+            #w = torch.tensor([[1, 2], [-1, 1], [1, 1]], dtype=torch.float32)
+            #net._fc_layers[0].weight = nn.Parameter(w.t())
             critic_relu_mlp = True
         else:
             net = Net(dim)
@@ -110,8 +110,11 @@ class GeneratorTest(parameterized.TestCase, alf.test.TestCase):
             net=net,
             mi_weight=mi_weight,
             par_vi=par_vi,
+            block_pinverse=True,
+            force_fullrank=True,
+            pinverse_hidden_size=50,
             critic_hidden_layers=(hidden_size, hidden_size),
-            optimizer=alf.optimizers.AdamTF(lr=2e-3),
+            optimizer=alf.optimizers.AdamTF(lr=1e-3),
             critic_optimizer=alf.optimizers.AdamTF(lr=2e-3))
 
         var = torch.tensor([1, 4], dtype=torch.float32)
@@ -146,11 +149,13 @@ class GeneratorTest(parameterized.TestCase, alf.test.TestCase):
                 self.assertGreater(
                     float(torch.sum(torch.abs(learned_var))), 0.5)
 
+    """
     @parameterized.parameters(
         dict(entropy_regularization=1.0),
         dict(entropy_regularization=0.0),
         dict(entropy_regularization=0.0, mi_weight=1),
-    )
+    )"""
+
     def test_generator_conditional(self,
                                    entropy_regularization=0.0,
                                    par_vi='svgd',
@@ -160,6 +165,7 @@ class GeneratorTest(parameterized.TestCase, alf.test.TestCase):
         net._u should be u for both STEIN and ML. And :math:`w^T w` should be :math:`diag(1, 4)`
         for STEIN and 0 for ML.
         """
+
         logging.info("entropy_regularization: %s mi_weight: %s" %
                      (entropy_regularization, mi_weight))
         dim = 2
