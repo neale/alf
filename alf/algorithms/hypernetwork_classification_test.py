@@ -66,7 +66,7 @@ class HyperNetworkClassificationTest(parameterized.TestCase,
 
     @parameterized.parameters(
         #('svgd2', False, None),
-        ('svgd3', False, None, 32, 32),
+        #('svgd3', False, None, 32, 32),
         #('gfsf', False, None),
         #('minmax', False, None),
         #('svgd2', True, None),
@@ -76,6 +76,7 @@ class HyperNetworkClassificationTest(parameterized.TestCase,
         #('svgd3', False, 'rkhs', 32, 32, 32),
         #('svgd3', False, 'rkhs', 32, 32, 16),
         #('svgd3', False, 'rkhs', 32, 32, 64),
+        ('svgd3', False, 'rkhs', 151, 151, 151),
         #('svgd3', False, 'rkhs', 64, 64, 24),
         #('svgd3', False, 'rkhs', 64, 64, 32),
         #('svgd3', False, 'rkhs', 64, 64, 16),
@@ -134,11 +135,12 @@ class HyperNetworkClassificationTest(parameterized.TestCase,
             functional_gradient=functional_gradient,
             block_pinverse=False,
             split_mlp=False,
-            force_fullrank=True,
+            force_fullrank=False,
+            jvp_autograd=False,
             pinverse_hidden_size=pinverse_hidden_size,
             critic_hidden_layers=(hidden_size, hidden_size),
             critic_iter_num=5,
-            optimizer=alf.optimizers.Adam(lr=lr),
+            optimizer=alf.optimizers.Adam(lr=lr, weight_decay=0),
             critic_optimizer=alf.optimizers.Adam(lr=lr),
             pinverse_optimizer=alf.optimizers.Adam(lr=1e-4),
             #logging_training=True,
@@ -172,10 +174,10 @@ class HyperNetworkClassificationTest(parameterized.TestCase,
             absl.logging.info('mean particle acc: {}'.format(mean_acc.item()))
             absl.logging.info('all particles acc: {}'.format(
                 sample_acc.item()))
-            #tag = f'gpvi_block_z{noise_dim}_h{hidden_size}_lr{lr}_p{pinverse_hidden_size}_1hl'
-            #plot_classification(i, algorithm, num_classes, test_inputs, tag)
+            tag = f'gpvi_new_inverse_z{noise_dim}_h{hidden_size}_lr{lr}_p{pinverse_hidden_size}_p1_nrank'
+            plot_classification(i, algorithm, num_classes, test_inputs, tag)
 
-        train_iter = 100000
+        train_iter = 500000
         for i in range(train_iter):
             algorithm.train_iter()
             if i % 1000 == 0:

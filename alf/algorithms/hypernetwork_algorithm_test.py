@@ -67,7 +67,7 @@ class HyperNetworkTest(parameterized.TestCase, alf.test.TestCase):
     )"""
 
     def test_bayesian_linear_regression(self,
-                                        par_vi='minmax',
+                                        par_vi='svgd3',
                                         function_vi=False,
                                         functional_gradient='rkhs',
                                         train_batch_size=10,
@@ -87,7 +87,7 @@ class HyperNetworkTest(parameterized.TestCase, alf.test.TestCase):
         input_size = 3
         input_spec = TensorSpec((input_size, ), torch.float32)
         output_dim = 1
-        batch_size = 50
+        batch_size = 200
         hidden_size = output_dim * batch_size
         inputs = input_spec.randn(outer_dims=(batch_size, ))
         beta = torch.rand(input_size, output_dim) + 5.
@@ -111,7 +111,8 @@ class HyperNetworkTest(parameterized.TestCase, alf.test.TestCase):
             loss_type='regression',
             par_vi=par_vi,
             function_vi=function_vi,
-            block_pinverse=True,
+            block_pinverse=False,
+            force_fullrank=False,
             functional_gradient=functional_gradient,
             function_bs=train_batch_size,
             critic_hidden_layers=(hidden_size, hidden_size),
@@ -140,6 +141,7 @@ class HyperNetworkTest(parameterized.TestCase, alf.test.TestCase):
 
         def _test(i, sampled_predictive=False):
             print("-" * 68)
+            #if output_dim <= input_size:
             weight = algorithm._generator._net._fc_layers[0].weight
             learned_cov = weight @ weight.t()
             print("norm of generator weight: {}".format(weight.norm()))
@@ -168,6 +170,7 @@ class HyperNetworkTest(parameterized.TestCase, alf.test.TestCase):
                     i, spred_err))
 
                 computed_mean = params.mean(0)
+                print(computed_mean.shape, true_mean.shape)
                 smean_err = torch.norm(computed_mean - true_mean.squeeze())
                 smean_err = smean_err / torch.norm(true_mean)
                 print("train_iter {}: sampled mean err {}".format(
@@ -178,7 +181,7 @@ class HyperNetworkTest(parameterized.TestCase, alf.test.TestCase):
                 scov_err = scov_err / torch.norm(true_cov)
                 print("train_iter {}: sampled cov err {}".format(i, scov_err))
 
-        train_iter = 3000
+        train_iter = 6000
         for i in range(train_iter):
             _train()
             if i % 1000 == 0:

@@ -20,7 +20,7 @@ import torch
 import torch.nn as nn
 
 import alf
-from alf.algorithms.generator import Generator
+from alf.algorithms.generator2 import Generator
 from alf.networks import Network, ReluMLP
 from alf.tensor_specs import TensorSpec
 
@@ -60,6 +60,7 @@ class GeneratorTest(parameterized.TestCase, alf.test.TestCase):
         self.assertEqual(x.shape, y.shape)
         self.assertLessEqual(float(torch.max(abs(x - y))), eps)
 
+    """
     @parameterized.parameters(
         #dict(entropy_regularization=1.0, par_vi='gfsf'),
         #dict(entropy_regularization=1.0, par_vi='svgd'),
@@ -76,11 +77,12 @@ class GeneratorTest(parameterized.TestCase, alf.test.TestCase):
         #    functional_gradient='minmax'),
         #dict(entropy_regularization=0.0),
         #dict(entropy_regularization=0.0, mi_weight=1),
-    )
+    )"""
+
     def test_generator_unconditional(self,
                                      entropy_regularization=1.0,
                                      par_vi='svgd',
-                                     functional_gradient=None,
+                                     functional_gradient='rkhs',
                                      mi_weight=None):
         r"""
         The generator is trained to match (STEIN) / maximize (ML) the likelihood
@@ -92,17 +94,18 @@ class GeneratorTest(parameterized.TestCase, alf.test.TestCase):
                      (entropy_regularization, par_vi, mi_weight))
         dim = 3
         noise_dim = 2
-        batch_size = 64
+        batch_size = 128
         hidden_size = 10
         if functional_gradient is not None:
             input_dim = TensorSpec((noise_dim, ))
             net = ReluMLP(
                 input_dim,
                 hidden_layers=(),
-                #head_size=(4, 2),
+                #head_size=(noise_dim, dim-noise_dim),
                 output_size=dim)
         else:
             net = Net(noise_dim, dim, hidden_size)
+        jac_autograd = block_pinverse = False
         generator = Generator(
             dim,
             noise_dim=noise_dim,
@@ -111,14 +114,14 @@ class GeneratorTest(parameterized.TestCase, alf.test.TestCase):
             mi_weight=mi_weight,
             par_vi=par_vi,
             functional_gradient=functional_gradient,
-            block_pinverse=False,
+            block_pinverse=block_pinverse,
             force_fullrank=True,
-            pinverse_hidden_size=5,
-            exact_jac_inverse=False,
-            jvp_autograd=False,
+            pinverse_hidden_size=100,
+            exact_jac_inverse=True,
+            jac_autograd=jac_autograd,
             critic_hidden_layers=(hidden_size, hidden_size),
-            optimizer=alf.optimizers.Adam(lr=5e-3),
-            pinverse_optimizer=alf.optimizers.Adam(lr=5e-4),
+            optimizer=alf.optimizers.Adam(lr=1e-3),
+            pinverse_optimizer=alf.optimizers.Adam(lr=1e-3),
             critic_optimizer=alf.optimizers.Adam(lr=2e-3))
 
         var = torch.rand(dim, dim).float()
@@ -134,15 +137,18 @@ class GeneratorTest(parameterized.TestCase, alf.test.TestCase):
             alg_step = generator.train_step(
                 inputs=None, loss_func=_neglogprob, batch_size=batch_size)
             generator.update_with_gradient(alg_step.info)
+            return alg_step.info.extra
 
-        for i in range(3000):
-            _train()
+        for i in range(30000):
+            step = _train()
             if functional_gradient is not None:
                 learned_var = torch.matmul(net._fc_layers[0].weight,
                                            net._fc_layers[0].weight.t())
             else:
                 learned_var = torch.matmul(net.fc.weight, net.fc.weight.t())
             if i % 500 == 0:
+                if functional_gradient is not None:
+                    print("pinverse loss", step.pinverse)
                 print(i, "learned var=", learned_var)
                 print('[{}] avg per dim variance error: {}'.format(
                     i, (var - learned_var).mean()))
@@ -205,7 +211,7 @@ class GeneratorTest(parameterized.TestCase, alf.test.TestCase):
             alg_step = generator.train_step(inputs=y, loss_func=_neglogprob)
             generator.update_with_gradient(alg_step.info)
 
-        for i in range(2000):
+        for i in range(500):
             _train()
             learned_var = torch.matmul(net.fc1.weight, net.fc1.weight.t())
             if i % 500 == 0:

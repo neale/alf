@@ -24,6 +24,23 @@ from alf.tensor_specs import TensorSpec
 from alf.utils.math_ops import identity
 
 
+def jacobian(y, x, create_graph=False):
+    """It is from Adam Paszke's implementation:
+    https://gist.github.com/apaszke/226abdf867c4e9d6698bd198f3b45fb7
+    """
+    jac = []
+    flat_y = y.reshape(-1)
+    grad_y = torch.zeros_like(flat_y)
+    for i in range(len(flat_y)):
+        grad_y[i] = 1.
+        grad_x, = torch.autograd.grad(
+            flat_y, x, grad_y, retain_graph=True, create_graph=create_graph)
+        jac.append(grad_x.reshape(x.shape))
+        grad_y[i] = 0.
+
+    return torch.stack(jac).reshape(y.shape + x.shape)
+
+
 @gin.configurable
 class SimpleFC(nn.Linear):
     """
@@ -130,7 +147,7 @@ class ReluMLP(Network):
             inputs = inputs.unsqueeze(0)
         assert inputs.ndim == 2 and inputs.shape[-1] == self._input_size, \
             ("inputs should has shape (B, {})!".format(self._input_size))
-
+        inputs.requires_grad_(True)
         z = inputs
         for fc in self._fc_layers:
             z = fc(z)
@@ -139,7 +156,15 @@ class ReluMLP(Network):
         if ndim == 1:
             z = z.squeeze(0)
         if requires_jac:
-            z = (z, self._compute_jac())
+            if (len(self._hidden_layers) + 1) > 1:
+                z = (z, self._compute_jac())
+            else:
+                jac_ad = jacobian(z, inputs)
+                jac = []
+                for i in range(jac_ad.shape[0]):
+                    jac.append(jac_ad[i, :, i, :])
+                jac = torch.stack(jac, dim=0)
+                z = (z, jac)
         elif requires_jac_diag:
             z = (z, self._compute_jac_diag())
 
