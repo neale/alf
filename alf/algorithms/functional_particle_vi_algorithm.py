@@ -365,8 +365,7 @@ class FuncParVIAlgorithm(ParVIAlgorithm):
                 state=())
 
     def _function_transform(self, data, params):
-        """
-        Transform the particles to its corresponding function values
+        """Transform the particles to its corresponding function values
         evaluated on the training batch. Used when function_vi is True.
 
         Args:
@@ -407,8 +406,7 @@ class FuncParVIAlgorithm(ParVIAlgorithm):
         return outputs, density_outputs
 
     def _function_neglogprob(self, targets, outputs):
-        """
-        Function computing negative log_prob loss for function outputs.
+        """Function computing negative log_prob loss for function outputs.
         Used when function_vi is True.
 
         Args:
@@ -437,8 +435,7 @@ class FuncParVIAlgorithm(ParVIAlgorithm):
         return self._loss_func(outputs, targets)
 
     def _neglogprob(self, inputs, params):
-        """
-        Function computing negative log_prob loss for generator outputs.
+        """Function computing negative log_prob loss for generator outputs.
         Used when function_vi is False.
 
         Args:
@@ -463,8 +460,8 @@ class FuncParVIAlgorithm(ParVIAlgorithm):
 
         return self._loss_func(output, target)
 
-    def evaluate(self, num_particles=None):
-        """Evaluate on the fixed ensemble. """
+    def evaluate(self):
+        """Evaluatation of the ParVI ensemble on a test dataset"""
 
         assert self._test_loader is not None, "Must set test_loader first."
         logging.info("==> Begin evaluating")
@@ -528,14 +525,19 @@ class FuncParVIAlgorithm(ParVIAlgorithm):
         total_loss = regression_loss(output, target)
         return loss, total_loss
 
-    def eval_uncertainty(self, num_particles=None):
-        """
-        Function to evaluate the metrics uncertainty quantification and
-            calibration
-        AUROC (AUC) evaluates the separability of model predictions with
-            respect to the training data and a prespecified outlier dataset
-        ECE evaluates how well calibrated the model's predictions are. That
-            is, how well does the expected confidence match the accuracy
+    def eval_uncertainty(self):
+        """Function to evaluate the epistemic uncertainty of the ensemble.
+        This method computes the following metrics:
+        
+        * AUROC (AUC) evaluates the separability of model predictions with
+          respect to the training data and a prespecified outlier dataset.
+          AUC is computed with respect to the entropy in the averaged
+          softmax probabilities, as well as the sum of the variance of 
+          the softmax probabilities over the ensemble. 
+        
+        Returns:
+            auroc_entropy (float): auroc of inlier-outlier predictive entropy
+            auroc_variance (float): auroc of inlier-outlier predictice variance
         """
 
         with torch.no_grad():

@@ -212,7 +212,7 @@ def load_nclass_test(num_classes,
 
 def get_classes(target, labels):
     """Helper function to subclass a dataloader, i.e. select only given
-        classes from target dataset.
+    classes from target dataset.
 
     Args:
         target (torch.utils.data.Dataset): the dataset that should be filtered.

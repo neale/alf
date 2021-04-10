@@ -31,8 +31,14 @@ class Net(Network):
             input_tensor_spec=TensorSpec(shape=(dim, )), name="Net")
 
         self.fc = nn.Linear(noise_dim, dim, bias=False)
+        #self.fc1 = nn.Linear(noise_dim, hidden_size, bias=False)
+        #self.fc2 = nn.Linear(hidden_size, dim, bias=False)
+        w = torch.tensor([[1, 2], [-1, 1], [1, 1]], dtype=torch.float32)
+        self.fc.weight = nn.Parameter(w.t())
 
     def forward(self, input, state=()):
+        #x = torch.nn.functional.relu(self.fc1(input))
+        #return self.fc2(x), ()
         return self.fc(input), ()
 
 
@@ -90,17 +96,13 @@ class GeneratorTest(parameterized.TestCase, alf.test.TestCase):
         """
         logging.info("entropy_regularization: %s par_vi: %s mi_weight: %s" %
                      (entropy_regularization, par_vi, mi_weight))
-        dim = 3
+        dim = 2
         noise_dim = 2
         batch_size = 64
         hidden_size = 10
         if functional_gradient is not None:
             input_dim = TensorSpec((noise_dim, ))
-            net = ReluMLP(
-                input_dim,
-                hidden_layers=(),
-                #head_size=(4, 2),
-                output_size=dim)
+            net = ReluMLP(input_dim, hidden_layers=(), output_size=dim)
         else:
             net = Net(noise_dim, dim, hidden_size)
         generator = Generator(
@@ -115,27 +117,25 @@ class GeneratorTest(parameterized.TestCase, alf.test.TestCase):
             force_fullrank=True,
             pinverse_hidden_size=5,
             exact_jac_inverse=False,
-            jvp_autograd=False,
             critic_hidden_layers=(hidden_size, hidden_size),
-            optimizer=alf.optimizers.Adam(lr=5e-3),
+            optimizer=alf.optimizers.AdamTF(lr=5e-3),
             pinverse_optimizer=alf.optimizers.Adam(lr=5e-4),
-            critic_optimizer=alf.optimizers.Adam(lr=2e-3))
+            critic_optimizer=alf.optimizers.AdamTF(lr=2e-3))
 
-        var = torch.rand(dim, dim).float()
-        var = torch.mm(var, var.t())
-        precision = torch.inverse(var)
-        print('True Var:', var)
+        var = torch.tensor([1, 4], dtype=torch.float32)
+        precision = 1. / var
 
         def _neglogprob(x):
-            y = 0.5 * torch.einsum('bi,ij,bj->b', x, precision, x)
-            return y
+            return torch.squeeze(
+                0.5 * torch.matmul(x * x, torch.reshape(precision, (dim, 1))),
+                axis=-1)
 
         def _train():
             alg_step = generator.train_step(
                 inputs=None, loss_func=_neglogprob, batch_size=batch_size)
             generator.update_with_gradient(alg_step.info)
 
-        for i in range(3000):
+        for i in range(10000):
             _train()
             if functional_gradient is not None:
                 learned_var = torch.matmul(net._fc_layers[0].weight,
@@ -149,7 +149,7 @@ class GeneratorTest(parameterized.TestCase, alf.test.TestCase):
         print('[{}] avg per dim variance error: {}'.format(
             i, (var - learned_var).mean()))
         if entropy_regularization == 1.0:
-            self.assertArrayEqual(var, learned_var, 0.2)
+            self.assertArrayEqual(torch.diag(var), learned_var, 1.2)
         else:
             if mi_weight is None:
                 self.assertArrayEqual(torch.zeros(dim, dim), learned_var, 0.2)

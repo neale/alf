@@ -563,8 +563,7 @@ class HyperNetwork(Algorithm):
                 state=())
 
     def _function_transform(self, data, params):
-        """
-        Transform the generator outputs to its corresponding function values
+        """Transform the generator outputs to its corresponding function values
         evaluated on the training batch. Used when function_vi is True.
 
         Args:
@@ -609,8 +608,7 @@ class HyperNetwork(Algorithm):
         return outputs, density_outputs, extra_samples
 
     def _function_neglogprob(self, targets, outputs):
-        """
-        Function computing negative log_prob loss for function outputs.
+        """Function computing negative log_prob loss for function outputs.
         Used when function_vi is True.
 
         Args:
@@ -683,7 +681,7 @@ class HyperNetwork(Algorithm):
         alf.summary.scalar(name='eval/test_loss', data=test_loss)
 
     def _classification_vote(self, output, target):
-        """ensmeble the ooutputs from sampled classifiers."""
+        """ensemble the ooutputs from sampled classifiers."""
         num_particles = output.shape[1]
         probs = F.softmax(output, dim=-1)  # [B, N, D]
         if self._voting == 'soft':
@@ -716,13 +714,19 @@ class HyperNetwork(Algorithm):
         return loss, total_loss
 
     def eval_uncertainty(self, num_particles=None):
-        """
-        Function to evaluate the metrics uncertainty quantification and
-            calibration
-        AUROC (AUC) evaluates the separability of model predictions with
-            respect to the training data and a prespecified outlier dataset
-        ECE evaluates how well calibrated the model's predictions are. That
-            is, how well does the expected confidence match the accuracy
+        """Function to evaluate the epistemic uncertainty of a sampled ensemble.
+            This method computes the following metrics:
+        
+        * AUROC (AUC): AUC is computed with respect to the entropy in the 
+          averaged softmax probabilities, as well as the sum of the
+          variance of the softmax probabilities over the ensemble. 
+
+        Args:
+            num_particles (int): number of sampled particles.
+                If None, then self.num_particles is used. 
+        Returns:
+            auroc_entropy (float): auroc of inlier-outlier predictive entropy
+            auroc_variance (float): auroc of inlier-outlier predictice variance
         """
         if num_particles is None:
             num_particles = self._num_particles
