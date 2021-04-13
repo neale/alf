@@ -418,8 +418,7 @@ class HyperNetwork(Algorithm):
                 state=())
 
     def _function_transform(self, data, params):
-        """
-        Transform the generator outputs to its corresponding function values
+        """Transform the generator outputs to its corresponding function values
         evaluated on the training batch. Used when function_vi is True.
 
         Args:
@@ -464,8 +463,7 @@ class HyperNetwork(Algorithm):
         return outputs, density_outputs, extra_samples
 
     def _function_neglogprob(self, targets, outputs):
-        """
-        Function computing negative log_prob loss for function outputs.
+        """Function computing negative log_prob loss for function outputs.
         Used when function_vi is True.
 
         Args:
@@ -539,7 +537,7 @@ class HyperNetwork(Algorithm):
         alf.summary.scalar(name='eval/test_loss', data=test_loss)
 
     def _classification_vote(self, output, target):
-        """ensmeble the ooutputs from sampled classifiers."""
+        """ensemble the ooutputs from sampled classifiers."""
         num_particles = output.shape[1]
         probs = F.softmax(output, dim=-1)  # [B, N, D]
         if self._voting == 'soft':
@@ -572,16 +570,19 @@ class HyperNetwork(Algorithm):
         return loss, total_loss
 
     def eval_uncertainty(self, num_particles=None):
-        """
-        Function to evaluate the epistemic uncertainty of a sampled ensemble.
+        """Function to evaluate the epistemic uncertainty of a sampled ensemble.
             This method computes the following metrics:
         
-            * AUROC (AUC): AUC is computed with respect to the entropy in the 
-                averaged softmax probabilities, as well as the sum of the
-                variance of the softmax probabilities over the ensemble. 
+        * AUROC (AUC): AUC is computed with respect to the entropy in the 
+          averaged softmax probabilities, as well as the sum of the
+          variance of the softmax probabilities over the ensemble. 
+
         Args:
             num_particles (int): number of sampled particles.
                 If None, then self.num_particles is used. 
+        Returns:
+            auroc_entropy (float): auroc of inlier-outlier predictive entropy
+            auroc_variance (float): auroc of inlier-outlier predictice variance
         """
 
         if num_particles is None:
@@ -594,15 +595,16 @@ class HyperNetwork(Algorithm):
                                               self._test_loader)
             outputs_outlier, _ = predict_dataset(self._param_net,
                                                  self._outlier_test_loader)
-        mean_outputs = outputs.mean(0)
-        mean_outputs_outlier = outputs_outlier.mean(0)
 
-        probs = F.softmax(mean_outputs, -1)
-        probs_outlier = F.softmax(mean_outputs_outlier, -1)
+        probs = F.softmax(outputs, -1)
+        probs_outlier = F.softmax(outputs_outlier, -1)
 
-        entropy = torch.distributions.Categorical(probs).entropy()
+        mean_probs = probs.mean(0)
+        mean_probs_outlier = probs_outlier.mean(0)
+
+        entropy = torch.distributions.Categorical(mean_probs).entropy()
         entropy_outlier = torch.distributions.Categorical(
-            probs_outlier).entropy()
+            mean_probs_outlier).entropy()
 
         variance = F.softmax(outputs, -1).var(0).sum(-1)
         variance_outlier = F.softmax(outputs_outlier, -1).var(0).sum(-1)

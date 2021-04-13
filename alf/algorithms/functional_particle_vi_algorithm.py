@@ -359,8 +359,7 @@ class FuncParVIAlgorithm(ParVIAlgorithm):
                 state=())
 
     def _function_transform(self, data, params):
-        """
-        Transform the particles to its corresponding function values
+        """Transform the particles to its corresponding function values
         evaluated on the training batch. Used when function_vi is True.
 
         Args:
@@ -401,8 +400,7 @@ class FuncParVIAlgorithm(ParVIAlgorithm):
         return outputs, density_outputs
 
     def _function_neglogprob(self, targets, outputs):
-        """
-        Function computing negative log_prob loss for function outputs.
+        """Function computing negative log_prob loss for function outputs.
         Used when function_vi is True.
 
         Args:
@@ -431,8 +429,7 @@ class FuncParVIAlgorithm(ParVIAlgorithm):
         return self._loss_func(outputs, targets)
 
     def _neglogprob(self, inputs, params):
-        """
-        Function computing negative log_prob loss for generator outputs.
+        """Function computing negative log_prob loss for generator outputs.
         Used when function_vi is False.
 
         Args:
@@ -458,9 +455,7 @@ class FuncParVIAlgorithm(ParVIAlgorithm):
         return self._loss_func(output, target)
 
     def evaluate(self):
-        """
-        Evaluatation of the ParVI ensemble on a test dataset
-        """
+        """Evaluatation of the ParVI ensemble on a test dataset"""
 
         assert self._test_loader is not None, "Must set test_loader first."
         logging.info("==> Begin evaluating")
@@ -521,15 +516,18 @@ class FuncParVIAlgorithm(ParVIAlgorithm):
         return loss, total_loss
 
     def eval_uncertainty(self):
-        """
-        Function to evaluate the epistemic uncertainty of the ensemble.
-            This method computes the following metrics:
+        """Function to evaluate the epistemic uncertainty of the ensemble.
+        This method computes the following metrics:
         
-            * AUROC (AUC) evaluates the separability of model predictions with
-                respect to the training data and a prespecified outlier dataset.
-                AUC is computed with respect to the entropy in the averaged
-                softmax probabilities, as well as the sum of the variance of 
-                the softmax probabilities over the ensemble. 
+        * AUROC (AUC) evaluates the separability of model predictions with
+          respect to the training data and a prespecified outlier dataset.
+          AUC is computed with respect to the entropy in the averaged
+          softmax probabilities, as well as the sum of the variance of 
+          the softmax probabilities over the ensemble. 
+        
+        Returns:
+            auroc_entropy (float): auroc of inlier-outlier predictive entropy
+            auroc_variance (float): auroc of inlier-outlier predictice variance
         """
 
         with torch.no_grad():
@@ -537,15 +535,16 @@ class FuncParVIAlgorithm(ParVIAlgorithm):
                                               self._test_loader)
             outputs_outlier, _ = predict_dataset(self._param_net,
                                                  self._outlier_test_loader)
-        mean_outputs = outputs.mean(0)
-        mean_outputs_outlier = outputs_outlier.mean(0)
 
-        probs = F.softmax(mean_outputs, -1)
-        probs_outlier = F.softmax(mean_outputs_outlier, -1)
+        probs = F.softmax(outputs, -1)
+        probs_outlier = F.softmax(outputs_outlier, -1)
 
-        entropy = torch.distributions.Categorical(probs).entropy()
+        mean_probs = probs.mean(0)
+        mean_probs_outlier = probs_outlier.mean(0)
+
+        entropy = torch.distributions.Categorical(mean_probs).entropy()
         entropy_outlier = torch.distributions.Categorical(
-            probs_outlier).entropy()
+            mean_probs_outlier).entropy()
 
         variance = F.softmax(outputs, -1).var(0).sum(-1)
         variance_outlier = F.softmax(outputs_outlier, -1).var(0).sum(-1)

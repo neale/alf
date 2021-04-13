@@ -205,6 +205,9 @@ class TrainerConfig(object):
         self.eval_interval = eval_interval
         self.epsilon_greedy = epsilon_greedy
         self.eval_uncertainty = eval_uncertainty
+        self.hold_out_dataset = hold_out_dataset
+        self.train_classes = train_classes
+        self.hold_out_classes = hold_out_classes
         self.num_eval_episodes = num_eval_episodes
         self.summary_interval = summary_interval
         self.update_counter_every_mini_batch = update_counter_every_mini_batch

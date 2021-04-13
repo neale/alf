@@ -26,9 +26,8 @@ except:
 
 
 def classification_loss(output, target):
-    """
-    Computes the cross entropy loss with respect to a batch of predictions and
-        targets.
+    """Computes the cross entropy loss with respect to a batch of predictions and
+    targets.
     
     Args:
         output (Tensor): predictions of shape ``[B, D]`` or ``[N, B, D]`` 
@@ -55,9 +54,8 @@ def classification_loss(output, target):
 
 
 def regression_loss(output, target):
-    """
-    Computes the MSE loss with respect to a batch of predictions and
-        targets.
+    """Computes the MSE loss with respect to a batch of predictions and
+    targets.
     
     Args:
         output (Tensor): predictions of shape ``[B, 1]`` or ``[N, B, 1]`` 
@@ -78,10 +76,9 @@ def regression_loss(output, target):
 
 
 def auc_score(inliers, outliers):
-    """
-    Computes the AUROC score w.r.t network outputs on two distinct datasets.
-        Typically, one dataset is the main training/testing set, while the
-        second dataset represents a set of unseen outliers.
+    """Computes the AUROC score w.r.t network outputs on two distinct datasets.
+    Typically, one dataset is the main training/testing set, while the
+    second dataset represents a set of unseen outliers.
     
     Args: 
         inliers (torch.tensor): set of predictions on inlier data
@@ -103,8 +100,7 @@ def auc_score(inliers, outliers):
 
 
 def predict_dataset(model, testset):
-    """
-    Computes predictions for an input dataset. 
+    """Computes predictions for an input dataset. 
     Args: 
         model (Callable): model with which to compute predictions.
         testset (torch.utils.data.DataLoader): dataset for which to compute
@@ -112,8 +108,11 @@ def predict_dataset(model, testset):
 
     Returns:
         model_outputs (torch.tensor): a tensor of shape [N, S, D] where
-        N refers to the number of predictors, S is the number of data
-        points, and D is the output dimensionality. 
+            N refers to the number of predictors, S is the number of data
+            points, and D is the output dimensionality. 
+        targets (torch.tensor): a tensor of shape [S] where S is the number
+            of data points. The ground truth labels of the data. 
+
     """
     if hasattr(testset.dataset, 'dataset'):
         cls = len(testset.dataset.dataset.classes)
