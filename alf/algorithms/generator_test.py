@@ -20,7 +20,7 @@ import torch
 import torch.nn as nn
 
 import alf
-from alf.algorithms.generator2 import Generator
+from alf.algorithms.generator import Generator
 from alf.networks import Network, ReluMLP
 from alf.tensor_specs import TensorSpec
 
@@ -92,9 +92,9 @@ class GeneratorTest(parameterized.TestCase, alf.test.TestCase):
         """
         logging.info("entropy_regularization: %s par_vi: %s mi_weight: %s" %
                      (entropy_regularization, par_vi, mi_weight))
-        dim = 3
-        noise_dim = 2
-        batch_size = 128
+        dim = 6
+        noise_dim = 3
+        batch_size = 64
         hidden_size = 10
         if functional_gradient is not None:
             input_dim = TensorSpec((noise_dim, ))
@@ -105,7 +105,7 @@ class GeneratorTest(parameterized.TestCase, alf.test.TestCase):
                 output_size=dim)
         else:
             net = Net(noise_dim, dim, hidden_size)
-        jac_autograd = block_pinverse = False
+        jac_autograd = block_pinverse = True
         generator = Generator(
             dim,
             noise_dim=noise_dim,
@@ -116,11 +116,12 @@ class GeneratorTest(parameterized.TestCase, alf.test.TestCase):
             functional_gradient=functional_gradient,
             block_pinverse=block_pinverse,
             force_fullrank=True,
-            pinverse_hidden_size=100,
-            exact_jac_inverse=True,
+            pinverse_hidden_size=10,
+            fullrank_diag_weight=1.00,
+            exact_jac_inverse=False,
             jac_autograd=jac_autograd,
             critic_hidden_layers=(hidden_size, hidden_size),
-            optimizer=alf.optimizers.Adam(lr=1e-3),
+            optimizer=alf.optimizers.Adam(lr=5e-2),
             pinverse_optimizer=alf.optimizers.Adam(lr=1e-3),
             critic_optimizer=alf.optimizers.Adam(lr=2e-3))
 
@@ -139,7 +140,7 @@ class GeneratorTest(parameterized.TestCase, alf.test.TestCase):
             generator.update_with_gradient(alg_step.info)
             return alg_step.info.extra
 
-        for i in range(30000):
+        for i in range(10000):
             step = _train()
             if functional_gradient is not None:
                 learned_var = torch.matmul(net._fc_layers[0].weight,

@@ -954,7 +954,7 @@ class Generator(Algorithm):
         # get V1 from eps
         eps_inputs_k = eps_inputs[:, :self._noise_dim]
         # compute (A + \lambdaI)^{-1}V1
-        A_block = self._pinverse.predict_step((z, eps_inputs_k)).output
+        A_block = self._pinverse.predict_step((z_inputs, eps_inputs_k)).output
         # compute B(A + \lambdaI)^{-1}V1
         if self._jac_autograd:
             outputs = torch.repeat_interleave(outputs, outputs.shape[0], dim=0)
@@ -1011,7 +1011,7 @@ class Generator(Algorithm):
                 yA, yB, outputs = self._compute_block_pinverse(
                     z_inputs, eps_inputs, outputs)
                 if self._jac_autograd:
-                    jac_y = torch.autograd.grad(
+                    jac_y = torch.autograd.grad(  # vjp
                         outputs[:, :self._noise_dim],
                         z_inputs,
                         yA,
@@ -1097,11 +1097,7 @@ class Generator(Algorithm):
         if not self._exact_jac_inverse:
             for _ in range(self._pinverse_solve_iters):
                 pinverse_loss = self._pinverse_train_step(
-                    #gen_inputs2.detach(), kernel_grad.detach(), outputs2.detach())
-                    #gen_inputs2, kernel_grad.detach(), outputs2)
-                    original_inputs2,
-                    kernel_grad.detach(),
-                    outputs2)
+                    original_inputs2, kernel_grad.detach(), outputs2)
                 self._pinverse.update_with_gradient(
                     LossInfo(loss=pinverse_loss))
 
@@ -1116,7 +1112,7 @@ class Generator(Algorithm):
                 original_inputs2,
                 kernel_grad_batch,
                 outputs2)  # [N2*N, D]
-            J_inv_kernel_grad = torch.cat([yA, yB], dim=-1).detach()
+            J_inv_kernel_grad = torch.cat([yA, yB], dim=-1)
         elif self._exact_jac_inverse:
             J_inv = torch.inverse(jac)
             J_inv_kernel_grad = torch.einsum('ijk, iaj->iak', J_inv,
