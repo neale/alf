@@ -188,8 +188,7 @@ class HyperNetwork(Algorithm):
                  function_extra_bs_std=1.,
                  functional_gradient=None,
                  block_pinverse=False,
-                 split_mlp=False,
-                 jvp_autograd=False,
+                 jac_autograd=False,
                  force_fullrank=True,
                  fullrank_diag_weight=1.0,
                  pinverse_solve_iters=1,
@@ -303,8 +302,8 @@ class HyperNetwork(Algorithm):
         gen_output_dim = param_net.param_length
         noise_spec = TensorSpec(shape=(noise_dim, ))
 
-        if functional_gradient or split_mlp:
-            if block_pinverse or split_mlp:
+        if functional_gradient:
+            if block_pinverse and not jac_autograd:
                 head_size = (noise_dim, gen_output_dim - noise_dim)
             else:
                 head_size = None
@@ -365,8 +364,7 @@ class HyperNetwork(Algorithm):
             critic_l2_weight=critic_l2_weight,
             functional_gradient=functional_gradient,
             block_pinverse=block_pinverse,
-            split_mlp=split_mlp,
-            jvp_autograd=jvp_autograd,
+            jac_autograd=jac_autograd,
             force_fullrank=force_fullrank,
             fullrank_diag_weight=fullrank_diag_weight,
             pinverse_solve_iters=pinverse_solve_iters,

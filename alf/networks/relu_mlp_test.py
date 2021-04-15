@@ -239,7 +239,7 @@ class ReluMLPTest(parameterized.TestCase, alf.test.TestCase):
             spec,
             output_size=output_size,
             hidden_layers=hidden_layers,
-            head_size=(2, output_size - 2))
+            head_size=(3, output_size - 3))
 
         # compute vjp using direct approach
         x = torch.randn(batch_size, input_size, requires_grad=True)
@@ -247,18 +247,25 @@ class ReluMLPTest(parameterized.TestCase, alf.test.TestCase):
         x1 = x.detach().clone()
         x1.requires_grad = True
         jvp_0, _ = mlp.compute_jvp_partial(x1, vec, partial_idx=0)
-        jvp_1, _ = mlp.compute_jvp_partial(x1, vec, partial_idx=1)
         jvp_2, _ = mlp.compute_jvp_partial(x1, vec, partial_idx=-1)
 
         # # compute jac using autograd
         y, _ = mlp(x)
-        jvp2_0 = jvp_autograd(x, y[:, :2], vec)
-        jvp2_1 = jvp_autograd(x, y[:, 2:], vec)
+        jvp2_0 = jvp_autograd(x, y[:, :3], vec)
         jvp2_2 = jvp_autograd(x, y, vec)
-
         self.assertArrayEqual(jvp_0, jvp2_0, 1e-6)
-        self.assertArrayEqual(jvp_1, jvp2_1, 1e-6)
         self.assertArrayEqual(jvp_2, jvp2_2, 1e-6)
+
+        x2 = torch.repeat_interleave(x1, batch_size, dim=0)
+        vec2 = torch.repeat_interleave(vec.t(), batch_size, dim=0).t()
+        jvp_1, _ = mlp.compute_jvp_partial(x2, vec2, partial_idx=1)
+
+        x3 = torch.repeat_interleave(x, batch_size, dim=0)
+        y2, _ = mlp(x3[::batch_size])
+        y2 = torch.repeat_interleave(y2, batch_size, dim=0)
+        jvp2_1 = jvp_autograd(x3, y2[:, 3:], vec2)
+
+        self.assertArrayEqual(jvp_1, jvp2_1, 1e-6)
 
     def test_autograd_jvp_partial(self,
                                   hidden_layers=(2, ),
@@ -297,6 +304,47 @@ class ReluMLPTest(parameterized.TestCase, alf.test.TestCase):
         self.assertArrayEqual(jvp_0, jvp[:, :2].t(), 1e-6)
         self.assertArrayEqual(jvp_1, jvp[:, 2:].t(), 1e-6)
         self.assertArrayEqual(jvp_2, jvp.t(), 1e-6)
+
+    @parameterized.parameters(
+        dict(hidden_layers=(4, )),
+        dict(hidden_layers=(4, 6), batch_size=1),
+        dict(hidden_layers=(4, 6)),
+    )
+    def test_autograd_vjp_partial(self,
+                                  hidden_layers=(2, ),
+                                  batch_size=2,
+                                  input_size=5):
+        """
+        Check that the vector-Jacobian product computed by the direct(autograd-free)
+        approach is consistent with the one computed by calling autograd.
+        """
+        output_size = 6
+        spec = TensorSpec((input_size, ))
+        mlp = ReluMLP(
+            spec,
+            output_size=output_size,
+            hidden_layers=hidden_layers,
+            head_size=(2, output_size - 2))
+
+        # compute vjp using direct approach
+        x = torch.randn(batch_size, input_size, requires_grad=True)
+        vec = torch.randn(batch_size, output_size, requires_grad=True)
+        x1 = x.detach().clone()
+        x1.requires_grad = True
+        vjp_0, _ = mlp.compute_vjp_partial(x1, vec[:, :2], partial_idx=0)
+        vjp_1, _ = mlp.compute_vjp_partial(x1, vec[:, 2:], partial_idx=1)
+        vjp_2, _ = mlp.compute_vjp_partial(x1, vec, partial_idx=-1)
+
+        y, _ = mlp(x)
+        vjp0 = torch.autograd.grad(
+            y[:, :2], x, vec[:, :2], create_graph=True)[0]
+        vjp1 = torch.autograd.grad(
+            y[:, 2:], x, vec[:, 2:], create_graph=True)[0]
+        vjp2 = torch.autograd.grad(y, x, vec, create_graph=True)[0]
+
+        self.assertArrayEqual(vjp_0, vjp0, 1e-6)
+        self.assertArrayEqual(vjp_1, vjp1, 1e-6)
+        self.assertArrayEqual(vjp_2, vjp2, 1e-6)
 
 
 if __name__ == "__main__":

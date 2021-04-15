@@ -23,6 +23,7 @@ import alf
 from alf.algorithms.generator import Generator
 from alf.networks import Network, ReluMLP
 from alf.tensor_specs import TensorSpec
+from alf.utils.math_ops import identity
 
 
 class Net(Network):
@@ -30,9 +31,12 @@ class Net(Network):
         super().__init__(
             input_tensor_spec=TensorSpec(shape=(dim, )), name="Net")
 
+        #self.fc = nn.Linear(noise_dim, noise_dim, bias=False)
+        #self.fc2 = nn.Linear(noise_dim, dim, bias=False)
         self.fc = nn.Linear(noise_dim, dim, bias=False)
 
     def forward(self, input, state=()):
+        #return self.fc2(self.fc(input)), ()
         return self.fc(input), ()
 
 
@@ -92,20 +96,26 @@ class GeneratorTest(parameterized.TestCase, alf.test.TestCase):
         """
         logging.info("entropy_regularization: %s par_vi: %s mi_weight: %s" %
                      (entropy_regularization, par_vi, mi_weight))
-        dim = 6
-        noise_dim = 3
+        dim = 3
+        noise_dim = 2
         batch_size = 64
         hidden_size = 10
+        jac_autograd = block_pinverse = True
+        block_pinverse = True
         if functional_gradient is not None:
             input_dim = TensorSpec((noise_dim, ))
+            if block_pinverse and not jac_autograd:
+                head_size = (noise_dim, dim - noise_dim)
+            else:
+                head_size = None
             net = ReluMLP(
                 input_dim,
-                hidden_layers=(),
-                #head_size=(noise_dim, dim-noise_dim),
+                hidden_layers=(),  #(dim,),
+                activation=identity,
+                head_size=head_size,
                 output_size=dim)
         else:
             net = Net(noise_dim, dim, hidden_size)
-        jac_autograd = block_pinverse = True
         generator = Generator(
             dim,
             noise_dim=noise_dim,
@@ -116,12 +126,13 @@ class GeneratorTest(parameterized.TestCase, alf.test.TestCase):
             functional_gradient=functional_gradient,
             block_pinverse=block_pinverse,
             force_fullrank=True,
-            pinverse_hidden_size=10,
-            fullrank_diag_weight=1.00,
+            pinverse_hidden_size=50,
+            fullrank_diag_weight=.5,
             exact_jac_inverse=False,
             jac_autograd=jac_autograd,
             critic_hidden_layers=(hidden_size, hidden_size),
-            optimizer=alf.optimizers.Adam(lr=5e-2),
+            pinverse_solve_iters=1,
+            optimizer=alf.optimizers.Adam(lr=1e-2),
             pinverse_optimizer=alf.optimizers.Adam(lr=1e-3),
             critic_optimizer=alf.optimizers.Adam(lr=2e-3))
 
@@ -140,16 +151,26 @@ class GeneratorTest(parameterized.TestCase, alf.test.TestCase):
             generator.update_with_gradient(alg_step.info)
             return alg_step.info.extra
 
-        for i in range(10000):
+        for i in range(8000):
             step = _train()
             if functional_gradient is not None:
                 learned_var = torch.matmul(net._fc_layers[0].weight,
                                            net._fc_layers[0].weight.t())
+                #learned_var1 = torch.matmul(net._fc_layers[0].weight,
+                #                            net._fc_layers[0].weight.t())
+                #if block_pinverse == True and jac_autograd == False:
+                #    weight = torch.cat((net._heads[0].weight, net._heads[1].weight), dim=0)
+                #else:
+                #    weight = net._fc_layers[1].weight
+                #learned_var = torch.matmul(torch.matmul(weight, learned_var1), weight.t())
             else:
                 learned_var = torch.matmul(net.fc.weight, net.fc.weight.t())
+                #learned_var1 = torch.matmul(net.fc.weight, net.fc.weight.t())
+                #learned_var = torch.matmul(
+                #    torch.matmul(net.fc2.weight, learned_var1), net.fc2.weight.t())
             if i % 500 == 0:
                 if functional_gradient is not None:
-                    print("pinverse loss", step.pinverse)
+                    print("pinverse loss", step.pinverse.mean())
                 print(i, "learned var=", learned_var)
                 print('[{}] avg per dim variance error: {}'.format(
                     i, (var - learned_var).mean()))

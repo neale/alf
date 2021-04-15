@@ -30,16 +30,17 @@ class Net(Network):
         super().__init__(
             input_tensor_spec=TensorSpec(shape=(dim, )), name="Net")
 
-        self.fc = nn.Linear(noise_dim, dim, bias=False)
+        self.fc = nn.Linear(noise_dim, noise_dim, bias=False)
+        self.fc2 = nn.Linear(noise_dim, dim, bias=False)
         #self.fc1 = nn.Linear(noise_dim, hidden_size, bias=False)
         #self.fc2 = nn.Linear(hidden_size, dim, bias=False)
-        w = torch.tensor([[1, 2], [-1, 1], [1, 1]], dtype=torch.float32)
-        self.fc.weight = nn.Parameter(w.t())
+        #w = torch.tensor([[1, 2], [-1, 1], [1, 1]], dtype=torch.float32)
+        #self.fc.weight = nn.Parameter(w.t())
 
     def forward(self, input, state=()):
         #x = torch.nn.functional.relu(self.fc1(input))
-        #return self.fc2(x), ()
-        return self.fc(input), ()
+        #return self.fc(input), ()
+        return self.fc2(self.fc(input)), ()
 
 
 class Net2(Network):
@@ -66,6 +67,7 @@ class GeneratorTest(parameterized.TestCase, alf.test.TestCase):
         self.assertEqual(x.shape, y.shape)
         self.assertLessEqual(float(torch.max(abs(x - y))), eps)
 
+    """
     @parameterized.parameters(
         #dict(entropy_regularization=1.0, par_vi='gfsf'),
         #dict(entropy_regularization=1.0, par_vi='svgd'),
@@ -82,10 +84,11 @@ class GeneratorTest(parameterized.TestCase, alf.test.TestCase):
         #    functional_gradient='minmax'),
         #dict(entropy_regularization=0.0),
         #dict(entropy_regularization=0.0, mi_weight=1),
-    )
+    )"""
+
     def test_generator_unconditional(self,
                                      entropy_regularization=1.0,
-                                     par_vi='svgd',
+                                     par_vi='svgd3',
                                      functional_gradient=None,
                                      mi_weight=None):
         r"""
@@ -98,7 +101,7 @@ class GeneratorTest(parameterized.TestCase, alf.test.TestCase):
                      (entropy_regularization, par_vi, mi_weight))
         dim = 2
         noise_dim = 2
-        batch_size = 64
+        batch_size = 128
         hidden_size = 10
         if functional_gradient is not None:
             input_dim = TensorSpec((noise_dim, ))
@@ -118,8 +121,8 @@ class GeneratorTest(parameterized.TestCase, alf.test.TestCase):
             pinverse_hidden_size=5,
             exact_jac_inverse=False,
             critic_hidden_layers=(hidden_size, hidden_size),
-            optimizer=alf.optimizers.AdamTF(lr=5e-3),
-            pinverse_optimizer=alf.optimizers.Adam(lr=5e-4),
+            optimizer=alf.optimizers.AdamTF(lr=1e-3),
+            pinverse_optimizer=alf.optimizers.Adam(lr=1e-4),
             critic_optimizer=alf.optimizers.AdamTF(lr=2e-3))
 
         var = torch.tensor([1, 4], dtype=torch.float32)
@@ -138,10 +141,16 @@ class GeneratorTest(parameterized.TestCase, alf.test.TestCase):
         for i in range(10000):
             _train()
             if functional_gradient is not None:
-                learned_var = torch.matmul(net._fc_layers[0].weight,
-                                           net._fc_layers[0].weight.t())
+                learned_var = torch.matmul(net._fc_layers[1].weight,
+                                           net._fc_layers[1].weight.t())
             else:
-                learned_var = torch.matmul(net.fc.weight, net.fc.weight.t())
+                #learned_var = torch.matmul(net.fc.weight, net.fc.weight.t())
+                learned_var1 = torch.matmul(net.fc.weight, net.fc.weight.t())
+                learned_var2 = torch.matmul(net.fc2.weight, net.fc2.weight.t())
+                learned_var = torch.matmul(
+                    torch.matmul(net.fc2.weight, learned_var1),
+                    net.fc2.weight.t())
+
             if i % 500 == 0:
                 print(i, "learned var=", learned_var)
                 print('[{}] avg per dim variance error: {}'.format(
@@ -149,7 +158,7 @@ class GeneratorTest(parameterized.TestCase, alf.test.TestCase):
         print('[{}] avg per dim variance error: {}'.format(
             i, (var - learned_var).mean()))
         if entropy_regularization == 1.0:
-            self.assertArrayEqual(torch.diag(var), learned_var, 1.2)
+            self.assertArrayEqual(torch.diag(var), learned_var, 0.2)
         else:
             if mi_weight is None:
                 self.assertArrayEqual(torch.zeros(dim, dim), learned_var, 0.2)

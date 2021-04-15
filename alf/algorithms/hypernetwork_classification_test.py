@@ -73,14 +73,39 @@ class HyperNetworkClassificationTest(parameterized.TestCase,
         #('svgd3', True, None),
         #('gfsf', True, None),
         #('svgd3', False, 'rkhs', 32, 32, 24),
-        #('svgd3', False, 'rkhs', 32, 32, 32),
-        #('svgd3', False, 'rkhs', 32, 32, 16),
-        #('svgd3', False, 'rkhs', 32, 32, 64),
-        ('svgd3', False, 'rkhs', 32, 32, 64),
+        #('svgd3', False, 'rkhs', 32, 32, 32, 1.0),
+        #('svgd3', False, 'rkhs', 32, 32, 32, .5),
+        #('svgd3', False, 'rkhs', 32, 32, 32, .3),
+        #('svgd3', False, 'rkhs', 32, 32, 16, 1.0),
+        #('svgd3', False, 'rkhs', 32, 32, 16, .5),
+        #('svgd3', False, 'rkhs', 32, 32, 16, .3),
+        #('svgd3', False, 'rkhs', 32, 32, 64, 1.0),
+        #('svgd3', False, 'rkhs', 32, 32, 64, .5),
+        #('svgd3', False, 'rkhs', 32, 32, 64, .3),
         #('svgd3', False, 'rkhs', 64, 64, 24),
         #('svgd3', False, 'rkhs', 64, 64, 32),
         #('svgd3', False, 'rkhs', 64, 64, 16),
-        #('svgd3', False, 'rkhs', 64, 64, 64),
+        #2
+        #('svgd3', False, 'rkhs', 64, 64, 64, 1.),
+        #('svgd3', False, 'rkhs', 64, 64, 64, .5),
+        #('svgd3', False, 'rkhs', 64, 64, 64, .3),
+        #('svgd3', False, 'rkhs', 64, 64, 32, 1.),
+        #('svgd3', False, 'rkhs', 64, 64, 32, .5),
+        #('svgd3', False, 'rkhs', 64, 64, 32, .3),
+        #('svgd3', False, 'rkhs', 64, 64, 128, 1.),
+        #('svgd3', False, 'rkhs', 64, 64, 128, .5),
+        #('svgd3', False, 'rkhs', 64, 64, 128, .3),
+        #3
+        ('svgd3', False, 'rkhs', 128, 128, 128, 1.),
+        ('svgd3', False, 'rkhs', 128, 128, 128, .5),
+        ('svgd3', False, 'rkhs', 128, 128, 128, .3),
+        ('svgd3', False, 'rkhs', 128, 128, 256, 1.),
+        ('svgd3', False, 'rkhs', 128, 128, 256, .5),
+        ('svgd3', False, 'rkhs', 128, 128, 256, .3),
+        ('svgd3', False, 'rkhs', 128, 128, 64, 1.),
+        ('svgd3', False, 'rkhs', 128, 128, 64, .5),
+        ('svgd3', False, 'rkhs', 128, 128, 64, .3),
+
         #('minmax', False, 'minmax'),
     )
     def test_classification_hypernetwork(self,
@@ -90,6 +115,7 @@ class HyperNetworkClassificationTest(parameterized.TestCase,
                                          noise_dim=16,
                                          hidden_size=16,
                                          pinverse_hidden_size=16,
+                                         lamb=1.0,
                                          num_classes=2,
                                          num_particles=100):
         """
@@ -118,7 +144,7 @@ class HyperNetworkClassificationTest(parameterized.TestCase,
         #noise_dim = 32
         #hidden_size = 32
         #pinverse_hidden_size = pinverse
-        lr = 1e-3
+        lr = 1e-4
         config = TrainerConfig(root_dir='dummy')
         algorithm = HyperNetwork(
             input_tensor_spec=input_spec,
@@ -126,7 +152,7 @@ class HyperNetworkClassificationTest(parameterized.TestCase,
             last_layer_param=(output_dim, True),
             last_activation=math_ops.identity,
             noise_dim=noise_dim,
-            hidden_layers=(hidden_size, hidden_size),
+            hidden_layers=(hidden_size, ),  #hidden_size),
             num_particles=num_particles,
             loss_type='classification',
             par_vi=par_vi,
@@ -134,9 +160,9 @@ class HyperNetworkClassificationTest(parameterized.TestCase,
             function_bs=train_batch_size,
             functional_gradient=functional_gradient,
             block_pinverse=True,
-            split_mlp=False,
             force_fullrank=True,
-            jvp_autograd=True,
+            jac_autograd=True,
+            fullrank_diag_weight=lamb,
             pinverse_hidden_size=pinverse_hidden_size,
             critic_hidden_layers=(hidden_size, hidden_size),
             critic_iter_num=5,
@@ -174,10 +200,10 @@ class HyperNetworkClassificationTest(parameterized.TestCase,
             absl.logging.info('mean particle acc: {}'.format(mean_acc.item()))
             absl.logging.info('all particles acc: {}'.format(
                 sample_acc.item()))
-            tag = f'gpvi_ad_inverse_z{noise_dim}_h{hidden_size}_lr{lr}_p{pinverse_hidden_size}_p1_nrank'
+            tag = f'gpvi_block_right_ad{noise_dim}_h{hidden_size}_lr{lr}_p{pinverse_hidden_size}_l{lamb}'
             plot_classification(i, algorithm, num_classes, test_inputs, tag)
 
-        train_iter = 500000
+        train_iter = 200000
         for i in range(train_iter):
             algorithm.train_iter()
             if i % 1000 == 0:

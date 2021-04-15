@@ -561,7 +561,7 @@ class Generator(Algorithm):
                             0., self._input_noise_stdev)  # [B, D-K]
                     gen_inputs = torch.cat((gen_inputs, extra_noise),
                                            dim=-1)  # [B, D]
-                    #outputs += self._fullrank_diag_weight * gen_inputs       # [B, D]
+                    outputs += self._fullrank_diag_weight * gen_inputs  # [B, D]
             else:
                 outputs = self._net(gen_inputs)[0]
         return outputs, gen_inputs
@@ -916,7 +916,7 @@ class Generator(Algorithm):
             z, A_block.t(), partial_idx=1)  # [N2*N, K]
         diag_weight = 1. / self._fullrank_diag_weight
         v2 = diag_weight * eps_inputs[:, self._noise_dim:]
-        B_block = -self._fullrank_diag_weight * jvp_B + v2
+        B_block = -self._fullrank_diag_weight * jvp_B.t() + v2
         return A_block, B_block
 
     def _pinverse_train_step(self, z, eps=None):
@@ -954,8 +954,7 @@ class Generator(Algorithm):
             eps_inputs = eps.reshape(eps.shape[0] * eps.shape[1],
                                      -1)  # [N2*N, D or K]
             if self._block_pinverse:
-                yA, yB, outputs = self._compute_block_pinverse(
-                    z_inputs, eps_inputs)
+                yA, yB = self._compute_block_pinverse(z_inputs, eps_inputs)
                 jac_y, _ = self._net.compute_vjp_partial(
                     z_inputs, yA, partial_idx=0)
                 jac_y = jac_y.reshape(eps.shape[0], eps.shape[1], -1)
@@ -1041,8 +1040,8 @@ class Generator(Algorithm):
                                                 -1).detach()
         if self._block_pinverse:
             yA, yB = self._compute_block_pinverse(
-                gen_inputs2_batch, kernel_grad_batch, outputs2)  # [N2*N, D]
-            J_inv_kernel_grad = torch.cat([yA, yB], dim=-1).detach()
+                gen_inputs2_batch, kernel_grad_batch)  # [N2*N, D]
+            J_inv_kernel_grad = torch.cat([yA, yB], dim=-1)
         elif self._exact_jac_inverse:
             J_inv = torch.inverse(jac)
             J_inv_kernel_grad = torch.einsum('ijk, iaj->iak', J_inv,

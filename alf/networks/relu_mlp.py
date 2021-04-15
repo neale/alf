@@ -59,7 +59,7 @@ class SimpleFC(nn.Linear):
             activation (nn.functional): activation used for this layer.
                 Default is math_ops.identity.
         """
-        super().__init__(input_size, output_size)
+        super().__init__(input_size, output_size, bias=False)
         self._activation = activation
         self._hidden_neurons = None
 
