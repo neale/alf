@@ -128,6 +128,7 @@ class GeneratorTest(parameterized.TestCase, alf.test.TestCase):
         self.assertEqual(x.shape, y.shape)
         self.assertLessEqual(float(torch.max(abs(x - y))), eps)
 
+    """
     @parameterized.parameters(
         dict(
             entropy_regularization=1.0,
@@ -149,17 +150,18 @@ class GeneratorTest(parameterized.TestCase, alf.test.TestCase):
             energy='sin_split'),
         dict(entropy_regularization=1.0, par_vi='minmax'),
         dict(entropy_regularization=0.0, mi_weight=1),
-    )
+    )"""
+
     def test_generator_unconditional(
             self,
             entropy_regularization=1.0,
             par_vi='svgd3',
             functional_gradient='rkhs',
             energy='twin_moons',
-            batch_size=256,
+            batch_size=128,
             input_noise_stdev=2.0,
-            n_layers=3,
-            hidden_size=512,
+            n_layers=6,
+            hidden_size=256,
             pinverse_hidden_size=64,
             mi_weight=None,
     ):
@@ -174,12 +176,7 @@ class GeneratorTest(parameterized.TestCase, alf.test.TestCase):
             (entropy_regularization, par_vi, mi_weight, energy))
         common.set_random_seed(None)
         dim = 2
-        #batch_size = 128
-        #hidden_size = 256
-        noise_dim = 2
-        #input_noise_stdev = 12.
-        #n_layers = 4
-        #pinverse_hidden_size = 256
+        noise_dim = 1
         if functional_gradient is not None:
             input_dim = TensorSpec((noise_dim, ))
             hidden_sizes = [hidden_size] * n_layers
@@ -188,7 +185,10 @@ class GeneratorTest(parameterized.TestCase, alf.test.TestCase):
         else:
             net = Net(noise_dim, dim, hidden_size)
 
+        print(net._fc_layers[0].weight.mean(), net._fc_layers[1].weight.mean(),
+              net._fc_layers[2].weight.mean())
         ll_fn = get_energy_function(energy)
+        fullrank_diag_weight = 1.
         generator = Generator(
             dim,
             noise_dim=noise_dim,
@@ -197,18 +197,22 @@ class GeneratorTest(parameterized.TestCase, alf.test.TestCase):
             mi_weight=mi_weight,
             par_vi=par_vi,
             functional_gradient=functional_gradient,
-            exact_jac_inverse=True,
+            exact_jac_inverse=False,
             pinverse_hidden_size=pinverse_hidden_size,
+            force_fullrank=True,
+            block_pinverse=True,
+            jac_autograd=True,
+            fullrank_diag_weight=fullrank_diag_weight,
             input_noise_stdev=input_noise_stdev,
             critic_hidden_layers=(hidden_size, hidden_size),
-            optimizer=alf.optimizers.Adam(lr=1e-4, weight_decay=1e-4),
+            optimizer=alf.optimizers.Adam(lr=1e-4),  #, weight_decay=1e-4),
             pinverse_optimizer=alf.optimizers.Adam(lr=1e-4),
             critic_optimizer=alf.optimizers.Adam(lr=1e-3))
 
         if functional_gradient is not None:
-            par_vi = par_vi + '_fg_{}ps_{}hs_{}bs_stdev{}_l{}'.format(
+            par_vi = par_vi + '_fg_{}ps_{}hs_{}bs_stdev{}_l{}_lamb{}_lr4'.format(
                 pinverse_hidden_size, hidden_size, batch_size,
-                input_noise_stdev, n_layers)
+                input_noise_stdev, n_layers, fullrank_diag_weight)
         else:
             par_vi = par_vi + '_{}hs_{}bs_stdev{}_l{}'.format(
                 hidden_size, batch_size, input_noise_stdev, n_layers)
@@ -235,6 +239,7 @@ class GeneratorTest(parameterized.TestCase, alf.test.TestCase):
                     batch_size=batch_size, training=False)
                 if isinstance(x, tuple):
                     x, _ = x
+                print('mean', x.mean(), 'var', x.var())
                 nll = _neglogprob(x).sum()
                 print('[{}] [iter {}], nll: {}'.format(par_vi, i, nll))
                 x, _ = generator._predict(batch_size=20000, training=False)

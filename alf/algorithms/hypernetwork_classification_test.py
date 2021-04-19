@@ -72,39 +72,99 @@ class HyperNetworkClassificationTest(parameterized.TestCase,
         #('svgd2', True, None),
         #('svgd3', True, None),
         #('gfsf', True, None),
-        #('svgd3', False, 'rkhs', 32, 32, 24),
-        #('svgd3', False, 'rkhs', 32, 32, 32, 1.0),
-        #('svgd3', False, 'rkhs', 32, 32, 32, .5),
-        #('svgd3', False, 'rkhs', 32, 32, 32, .3),
-        #('svgd3', False, 'rkhs', 32, 32, 16, 1.0),
-        #('svgd3', False, 'rkhs', 32, 32, 16, .5),
-        #('svgd3', False, 'rkhs', 32, 32, 16, .3),
+        #('svgd3', False, 'rkhs', 24, 64, 64, .3, 1),
+        #('svgd3', False, 'rkhs', 24, 64, 64, .35, 1),
+        #('svgd3', False, 'rkhs', 24, 64, 64, .25, 1),
+        #('svgd3', False, 'rkhs', 24, 100, 100, .3, 1),
+        #('svgd3', False, 'rkhs', 24, 100, 100, .25, 1),
+        #('svgd3', False, 'rkhs', 24, 100, 100, .35, 1),
+        ('svgd3', False, 'rkhs', 24, 32, 32, .3, 1),
+        ('svgd3', False, 'rkhs', 24, 32, 32, .35, 1),
+        ('svgd3', False, 'rkhs', 24, 32, 32, .25, 1),
         #('svgd3', False, 'rkhs', 32, 32, 64, 1.0),
         #('svgd3', False, 'rkhs', 32, 32, 64, .5),
         #('svgd3', False, 'rkhs', 32, 32, 64, .3),
         #('svgd3', False, 'rkhs', 64, 64, 24),
         #('svgd3', False, 'rkhs', 64, 64, 32),
         #('svgd3', False, 'rkhs', 64, 64, 16),
+
+        #('svgd3', False, 'rkhs', 24, 24, 24, .3, 1),
+        #('svgd3', False, 'rkhs', 24, 24, 24, .3, 2),
+        #('svgd3', False, 'rkhs', 24, 24, 24, .4, 1),
+        #('svgd3', False, 'rkhs', 24, 24, 24, .4, 2),
+        #('svgd3', False, 'rkhs', 24, 24, 24, .5, 1),
+        #('svgd3', False, 'rkhs', 24, 24, 24, .5, 2),
+        #('svgd3', False, 'rkhs', 24, 24, 24, .6, 1),
+        #('svgd3', False, 'rkhs', 24, 24, 24, .6, 2),
+        #('svgd3', False, 'rkhs', 24, 24, 64, .3, 1),
+        #('svgd3', False, 'rkhs', 24, 24, 64, .3, 2),
+        #('svgd3', False, 'rkhs', 24, 24, 64, .4, 1),
+        #('svgd3', False, 'rkhs', 24, 24, 64, .4, 2),
+        #('svgd3', False, 'rkhs', 24, 24, 64, .5, 1),
+        #('svgd3', False, 'rkhs', 24, 24, 64, .5, 2),
+        #('svgd3', False, 'rkhs', 24, 24, 64, .6, 1),
+        #('svgd3', False, 'rkhs', 24, 24, 64, .6, 2),
+        #('svgd3', False, 'rkhs', 24, 24, 128, .3, 1),
+        #('svgd3', False, 'rkhs', 24, 24, 128, .3, 2),
+        #('svgd3', False, 'rkhs', 24, 24, 128, .4, 1),
+        #('svgd3', False, 'rkhs', 24, 24, 128, .4, 2),
+        #('svgd3', False, 'rkhs', 24, 24, 128, .5, 1),
+        #('svgd3', False, 'rkhs', 24, 24, 128, .5, 2),
+        #('svgd3', False, 'rkhs', 24, 24, 128, .6, 1),
+        #('svgd3', False, 'rkhs', 24, 24, 128, .6, 2),"""
         #2
-        #('svgd3', False, 'rkhs', 64, 64, 64, 1.),
-        #('svgd3', False, 'rkhs', 64, 64, 64, .5),
-        #('svgd3', False, 'rkhs', 64, 64, 64, .3),
-        #('svgd3', False, 'rkhs', 64, 64, 32, 1.),
-        #('svgd3', False, 'rkhs', 64, 64, 32, .5),
-        #('svgd3', False, 'rkhs', 64, 64, 32, .3),
-        #('svgd3', False, 'rkhs', 64, 64, 128, 1.),
-        #('svgd3', False, 'rkhs', 64, 64, 128, .5),
-        #('svgd3', False, 'rkhs', 64, 64, 128, .3),
+        #('svgd3', False, 'rkhs', 64, 64, 64, .3, 1),
+        #('svgd3', False, 'rkhs', 64, 64, 64, .3, 2),
+        #('svgd3', False, 'rkhs', 64, 64, 64, .4, 1),
+        #('svgd3', False, 'rkhs', 64, 64, 64, .4, 2),
+        #('svgd3', False, 'rkhs', 64, 64, 64, .5, 1),
+        #('svgd3', False, 'rkhs', 64, 64, 64, .5, 2),
+        #('svgd3', False, 'rkhs', 64, 64, 64, .6, 1),
+        #('svgd3', False, 'rkhs', 64, 64, 64, .6, 2),
+        #('svgd3', False, 'rkhs', 64, 64, 256, .3, 1),
+        #('svgd3', False, 'rkhs', 64, 64, 256, .3, 2),
+        #('svgd3', False, 'rkhs', 64, 64, 256, .4, 1),
+        #('svgd3', False, 'rkhs', 64, 64, 256, .4, 2),
+        #('svgd3', False, 'rkhs', 64, 64, 256, .5, 1),
+        #('svgd3', False, 'rkhs', 64, 64, 256, .5, 2),
+        #('svgd3', False, 'rkhs', 64, 64, 256, .6, 1),
+        #('svgd3', False, 'rkhs', 64, 64, 256, .6, 2),
+        #('svgd3', False, 'rkhs', 64, 64, 128, .3, 1),
+        #('svgd3', False, 'rkhs', 64, 64, 128, .3, 2),
+        #('svgd3', False, 'rkhs', 64, 64, 128, .4, 1),
+        #('svgd3', False, 'rkhs', 64, 64, 128, .4, 2),
+        #('svgd3', False, 'rkhs', 64, 64, 128, .5, 1),
+        #('svgd3', False, 'rkhs', 64, 64, 128, .5, 2),
+        #('svgd3', False, 'rkhs', 64, 64, 128, .6, 1),
+        #('svgd3', False, 'rkhs', 64, 64, 128, .6, 2),
         #3
-        ('svgd3', False, 'rkhs', 128, 128, 128, 1.),
-        ('svgd3', False, 'rkhs', 128, 128, 128, .5),
-        ('svgd3', False, 'rkhs', 128, 128, 128, .3),
-        ('svgd3', False, 'rkhs', 128, 128, 256, 1.),
-        ('svgd3', False, 'rkhs', 128, 128, 256, .5),
-        ('svgd3', False, 'rkhs', 128, 128, 256, .3),
-        ('svgd3', False, 'rkhs', 128, 128, 64, 1.),
-        ('svgd3', False, 'rkhs', 128, 128, 64, .5),
-        ('svgd3', False, 'rkhs', 128, 128, 64, .3),
+
+        #('svgd3', False, 'rkhs', 128, 128, 128, .3, 1),
+        #('svgd3', False, 'rkhs', 128, 128, 128, .3, 2),
+        #('svgd3', False, 'rkhs', 128, 128, 128, .4, 1),
+        #('svgd3', False, 'rkhs', 128, 128, 128, .4, 2),
+        #('svgd3', False, 'rkhs', 128, 128, 128, .5, 1),
+        #('svgd3', False, 'rkhs', 128, 128, 128, .5, 2),
+        #('svgd3', False, 'rkhs', 128, 128, 128, .6, 1),
+        #('svgd3', False, 'rkhs', 128, 128, 128, .6, 2),
+
+        #('svgd3', False, 'rkhs', 128, 128, 256, .5, 1),
+        #('svgd3', False, 'rkhs', 128, 128, 256, .5, 2),
+        #('svgd3', False, 'rkhs', 128, 128, 256, .6, 1),
+        #('svgd3', False, 'rkhs', 128, 128, 256, .6, 2),
+        #('svgd3', False, 'rkhs', 128, 128, 256, .4, 1),
+        #('svgd3', False, 'rkhs', 128, 128, 256, .4, 2),
+        #('svgd3', False, 'rkhs', 128, 128, 256, .3, 1),
+        #('svgd3', False, 'rkhs', 128, 128, 256, .3, 2),
+
+        #('svgd3', False, 'rkhs', 128, 128, 512, .5, 1),
+        #('svgd3', False, 'rkhs', 128, 128, 512, .5, 2),
+        #('svgd3', False, 'rkhs', 128, 128, 512, .3, 1),
+        #('svgd3', False, 'rkhs', 128, 128, 512, .3, 2),
+        #('svgd3', False, 'rkhs', 128, 128, 512, .6, 1),
+        #('svgd3', False, 'rkhs', 128, 128, 512, .6, 2),
+        #('svgd3', False, 'rkhs', 128, 128, 512, .4, 1),
+        #('svgd3', False, 'rkhs', 128, 128, 512, .4, 2),
 
         #('minmax', False, 'minmax'),
     )
@@ -116,7 +176,8 @@ class HyperNetworkClassificationTest(parameterized.TestCase,
                                          hidden_size=16,
                                          pinverse_hidden_size=16,
                                          lamb=1.0,
-                                         num_classes=2,
+                                         n_hidden=1,
+                                         num_classes=4,
                                          num_particles=100):
         """
         Symmetric 4-class classification problem. The training data are drawn
@@ -145,6 +206,7 @@ class HyperNetworkClassificationTest(parameterized.TestCase,
         #hidden_size = 32
         #pinverse_hidden_size = pinverse
         lr = 1e-4
+        plr = 1e-3
         config = TrainerConfig(root_dir='dummy')
         algorithm = HyperNetwork(
             input_tensor_spec=input_spec,
@@ -152,7 +214,7 @@ class HyperNetworkClassificationTest(parameterized.TestCase,
             last_layer_param=(output_dim, True),
             last_activation=math_ops.identity,
             noise_dim=noise_dim,
-            hidden_layers=(hidden_size, ),  #hidden_size),
+            hidden_layers=(hidden_size, ) * n_hidden,  #hidden_size),
             num_particles=num_particles,
             loss_type='classification',
             par_vi=par_vi,
@@ -168,7 +230,7 @@ class HyperNetworkClassificationTest(parameterized.TestCase,
             critic_iter_num=5,
             optimizer=alf.optimizers.Adam(lr=lr, weight_decay=0),
             critic_optimizer=alf.optimizers.Adam(lr=lr),
-            pinverse_optimizer=alf.optimizers.Adam(lr=1e-4),
+            pinverse_optimizer=alf.optimizers.Adam(lr=plr),
             #logging_training=True,
             config=config)
 
@@ -200,13 +262,13 @@ class HyperNetworkClassificationTest(parameterized.TestCase,
             absl.logging.info('mean particle acc: {}'.format(mean_acc.item()))
             absl.logging.info('all particles acc: {}'.format(
                 sample_acc.item()))
-            tag = f'gpvi_block_right_ad{noise_dim}_h{hidden_size}_lr{lr}_p{pinverse_hidden_size}_l{lamb}'
+            tag = f'gpvi_block_right_ad{noise_dim}_h{hidden_size}_lr{lr}_p{pinverse_hidden_size}_l{lamb}_nh{n_hidden}_plr{plr}'
             plot_classification(i, algorithm, num_classes, test_inputs, tag)
 
-        train_iter = 200000
+        train_iter = 500000
         for i in range(train_iter):
             algorithm.train_iter()
-            if i % 1000 == 0:
+            if i % 5000 == 0:
                 _test(i)
 
         algorithm.evaluate()

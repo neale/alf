@@ -43,6 +43,7 @@ class GenerativeAdversarialAlgorithm(Algorithm):
     """
 
     def __init__(self,
+                 output_dim,
                  input_tensor_spec=None,
                  conv_layer_params=None,
                  critic_conv_layer_params=None,
@@ -61,6 +62,7 @@ class GenerativeAdversarialAlgorithm(Algorithm):
                  critic_iter_num=5,
                  functional_gradient=None,
                  block_pinverse=False,
+                 jac_autograd=True,
                  force_fullrank=True,
                  fullrank_diag_weight=1.0,
                  pinverse_solve_iters=1,
@@ -135,16 +137,13 @@ class GenerativeAdversarialAlgorithm(Algorithm):
         start_decoding_size = 2
         start_decoding_channels = 8 * 128
 
+        gen_output_dim = output_dim
+
         if functional_gradient:
-            if block_pinverse:
-                head_size = (noise_dim, gen_output_dim - noise_dim)
-            else:
-                head_size = None
-            if net is not None:
+            if net is None:
                 net = ReluMLP(
                     noise_spec,
                     hidden_layers=hidden_layers,
-                    head_size=head_size,
                     output_size=gen_output_dim,
                     name='Generator')
         else:
@@ -182,14 +181,15 @@ class GenerativeAdversarialAlgorithm(Algorithm):
             par_vi = 'svgd3'
 
         self._generator = Generator(
-            np.prod(input_tensor_spec),
+            gen_output_dim,
             noise_dim=noise_dim,
             net=net,
-            entropy_regularization=0.,
+            entropy_regularization=entropy_regularization,
             par_vi=par_vi,
             functional_gradient=functional_gradient,
             block_pinverse=block_pinverse,
             force_fullrank=force_fullrank,
+            jac_autograd=jac_autograd,
             fullrank_diag_weight=fullrank_diag_weight,
             pinverse_solve_iters=pinverse_solve_iters,
             pinverse_hidden_size=pinverse_hidden_size,
@@ -240,6 +240,7 @@ class GenerativeAdversarialAlgorithm(Algorithm):
         alf.summary.increment_global_counter()
         with record_time("time/train"):
             loss = 0.
+            pinverse_loss = 0.
             for batch_idx, (data, _) in enumerate(self._train_loader):
                 data = data.to(alf.get_default_device())
                 if batch_idx % (self._critic_iter_num + 1):
@@ -250,7 +251,14 @@ class GenerativeAdversarialAlgorithm(Algorithm):
                 loss_info, samples = self.update_with_gradient(alg_step.info)
                 self._generator.after_update(alg_step.info)
                 loss += loss_info.loss
-
+                if model == 'generator':
+                    if self._functional_gradient is not None:
+                        pinverse_loss += loss_info.extra.pinverse
+        if self._logging_training:
+            logging.info("Cum Loss: {}".format(loss))
+            if self._functional_gradient:
+                logging.info("Avg Pinverse Loss: {}".format(
+                    pinverse_loss / batch_idx))
         samples = self.sample_outputs(batch_size=data.shape[0])
         samples = samples.detach()
         if save_samples:
@@ -296,6 +304,12 @@ class GenerativeAdversarialAlgorithm(Algorithm):
             loss_data = -1 * critic_data.mean()
             loss_gen = critic_samples.mean()
             loss = loss_data + loss_gen + grad_penalty
+            step = AlgStep(
+                output=samples,
+                state=(),
+                info=LossInfo(
+                    loss=loss, extra=GenerativeAdversarialLossInfo(loss=loss)))
+
         else:
             self._generator._net.zero_grad()
             for param in self.critic.parameters():
@@ -303,7 +317,7 @@ class GenerativeAdversarialAlgorithm(Algorithm):
             if self._par_vi is not None:
                 step = self._generator.train_step(
                     inputs=None,
-                    loss_func=functools.partial(self._eval_critic, samples),
+                    loss_func=self._critic_loss,
                     batch_size=inputs.shape[0],
                     entropy_regularization=self._entropy_regularization,
                     state=state)
@@ -311,15 +325,17 @@ class GenerativeAdversarialAlgorithm(Algorithm):
                 samples = self.sample_outputs(batch_size=inputs.shape[0])
                 critic_samples = self.critic(samples)[0].mean()
                 loss = -1 * critic_samples
+                step = AlgStep(
+                    output=samples,
+                    state=(),
+                    info=LossInfo(
+                        loss=loss,
+                        extra=GenerativeAdversarialLossInfo(loss=loss)))
+        return step
 
-        return AlgStep(
-            output=samples,
-            state=(),
-            info=LossInfo(
-                loss=loss, extra=GenerativeAdversarialLossInfo(loss=loss)))
-
-    def _eval_critic(self, inputs):
-        return self.critic(inputs)
+    def _critic_loss(self, inputs):
+        critic_outputs = -1 * self.critic(inputs)[0]
+        return LossInfo(loss=critic_outputs)
 
     def evaluate(self):
         """Evaluate on a randomly drawn network. """

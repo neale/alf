@@ -127,7 +127,7 @@ class GeneratorTest(parameterized.TestCase, alf.test.TestCase):
             block_pinverse=block_pinverse,
             force_fullrank=True,
             pinverse_hidden_size=50,
-            fullrank_diag_weight=.5,
+            fullrank_diag_weight=.1,
             exact_jac_inverse=False,
             jac_autograd=jac_autograd,
             critic_hidden_layers=(hidden_size, hidden_size),
