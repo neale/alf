@@ -49,23 +49,23 @@ class Net(Network):
 
     def forward(self, input, state=()):
         x = self.fc1(input)
-        x = self.fc2(x)
-        x = self.fc3(x)
+        #x = self.fc2(x)
+        #x = self.fc3(x)
         x = self.fc4(x)
         return x, state
 
 
 class Net2(Network):
-    def __init__(self, input_dim):
+    def __init__(self, input_dim, hidden_size):
         super().__init__(
             input_tensor_spec=TensorSpec(
                 shape=(input_dim, ), dtype=torch.float32),
             name="Net2")
 
-        self.fc1 = FC(input_dim, 256, activation=F.relu)
-        self.fc2 = FC(256, 256, activation=F.relu)
-        self.fc3 = FC(256, 256, activation=F.relu)
-        self.fc4 = FC(256, 1)
+        self.fc1 = FC(input_dim, hidden_size, activation=F.relu)
+        self.fc2 = FC(hidden_size, hidden_size, activation=F.relu)
+        self.fc3 = FC(hidden_size, hidden_size, activation=F.relu)
+        self.fc4 = FC(hidden_size, 1)
 
     def forward(self, input, state=()):
         x = self.fc1(input)
@@ -136,8 +136,8 @@ class GenerativeAdversarialTest(parameterized.TestCase, alf.test.TestCase):
         dim = 2
         noise_dim = 1
         d_iters = 5
-        net = Net(noise_dim, dim, hidden_size=64)
-        critic = Net2(dim)
+        net = Net(noise_dim, dim, hidden_size=256)
+        critic = Net2(dim, hidden_size=256)
 
         trainset = Test8GaussiansDataSet(size=20000)
         train_loader = torch.utils.data.DataLoader(
@@ -148,7 +148,7 @@ class GenerativeAdversarialTest(parameterized.TestCase, alf.test.TestCase):
             input_tensor_spec=TensorSpec(shape=(dim, )),
             net=net,
             critic=critic,
-            grad_lambda=.10,
+            grad_lambda=.50,
             critic_weight_clip=0.,
             critic_iter_num=d_iters,
             noise_dim=noise_dim,
@@ -157,10 +157,10 @@ class GenerativeAdversarialTest(parameterized.TestCase, alf.test.TestCase):
             entropy_regularization=entropy_regularization,
             block_pinverse=True,
             jac_autograd=True,
-            fullrank_diag_weight=.1,
-            pinverse_hidden_size=10,
-            pinverse_solve_iters=5,
-            pinverse_optimizer=alf.optimizers.Adam(lr=1e-3),
+            fullrank_diag_weight=.5,
+            pinverse_hidden_size=256,
+            pinverse_solve_iters=1,
+            pinverse_optimizer=alf.optimizers.Adam(lr=1e-4),
             critic_optimizer=alf.optimizers.Adam(lr=1e-4, betas=(.5, .9)),
             optimizer=alf.optimizers.Adam(lr=1e-4, betas=(.5, .9)),
             logging_training=True)
