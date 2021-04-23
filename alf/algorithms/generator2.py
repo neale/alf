@@ -393,7 +393,6 @@ class Generator(Algorithm):
         self._functional_gradient = functional_gradient
         self._input_noise_stdev = input_noise_stdev
         self._exact_jac_inverse = exact_jac_inverse
-
         if entropy_regularization == 0:
             self._grad_func = self._ml_grad
         else:
@@ -538,30 +537,17 @@ class Generator(Algorithm):
             outputs = self._predict_net(gen_inputs)[0]
         else:
             if self._functional_gradient is not None:
-                outputs = self._net(
-                    gen_inputs, requires_jac=self._exact_jac_inverse)[0]
-                if self._exact_jac_inverse and self._force_fullrank:
-                    extra_noise = torch.randn(
-                        noise.shape[0], self._output_dim - self._noise_dim)
-                    gen_inputs = torch.cat((gen_inputs, extra_noise), dim=-1)
-                    outputs, jac = outputs
-
-                    outputs += self._fullrank_diag_weight * gen_inputs
-                    zero_vec = torch.zeros(noise.shape[0], self._output_dim,
-                                           self._output_dim - self._noise_dim)
-                    jac = torch.cat((jac, zero_vec), dim=-1)
-                    jac += self._fullrank_diag_weight * torch.eye(
-                        self._output_dim)
-                    outputs = (outputs, jac)
-
-                elif self._force_fullrank:
+                if self._force_fullrank:
                     extra_noise = torch.ones(
                         noise.shape[0],
                         self._output_dim - self._noise_dim).normal_(
                             0., self._input_noise_stdev)  # [B, D-K]
+                    outputs = self._net(gen_inputs)[0]  # [B, D]
                     gen_inputs = torch.cat((gen_inputs, extra_noise),
                                            dim=-1)  # [B, D]
                     outputs += self._fullrank_diag_weight * gen_inputs  # [B, D]
+                else:
+                    outputs = self._net(gen_inputs)[0]
             else:
                 outputs = self._net(gen_inputs)[0]
         return outputs, gen_inputs
@@ -901,25 +887,26 @@ class Generator(Algorithm):
 
         return loss, loss_propagated
 
-    def _compute_block_pinverse(self, z_inputs, eps_inputs):
+    def _compute_block_pinverse(self, z_inputs, eps_inputs, outputs):
         """
         My main concern is a jvp every time we do inference
         """
         # make z into k dim (might not be true for inference)
         z = z_inputs[:, :self._noise_dim]
         # get V1 from eps
-        eps_inputs_k = eps_inputs[:, :self._noise_dim]
+        v1 = eps_inputs[:, :self._noise_dim]
+        v2 = eps_inputs[:, self._noise_dim:]
         # compute (A + \lambdaI)^{-1}V1
-        A_block = self._pinverse.predict_step((z, eps_inputs_k)).output
+        A_block = self._pinverse.predict_step((z_inputs, v1)).output
         # compute B(A + \lambdaI)^{-1}V1
         jvp_B, _ = self._net.compute_jvp_partial(
             z, A_block.t(), partial_idx=1)  # [N2*N, K]
         diag_weight = 1. / self._fullrank_diag_weight
-        v2 = diag_weight * eps_inputs[:, self._noise_dim:]
-        B_block = -self._fullrank_diag_weight * jvp_B.t() + v2
-        return A_block, B_block
+        v2 = diag_weight * v2
+        B_block = -1 * self._fullrank_diag_weight * jvp_B.t() + v2
+        return A_block, B_block, outputs
 
-    def _pinverse_train_step(self, z, eps=None):
+    def _pinverse_train_step(self, z, eps=None, outputs=None):
         r"""Compute the loss for pinverse training. 
         self._pinverse solves an inverse problem for the amortized 
         functional gradient vi methods ``rkhs`` and ``minmax``. 
@@ -947,19 +934,23 @@ class Generator(Algorithm):
 
         if self._functional_gradient == 'rkhs':
             assert eps.ndim == 3
-            assert z.shape[0] == eps.shape[0]
             assert eps.shape[-1] == self._eps_dim
+            assert z.shape[0] == eps.shape[0]
             z_inputs = torch.repeat_interleave(
                 z_inputs, eps.shape[1], dim=0)  # [N2*N, K]
             eps_inputs = eps.reshape(eps.shape[0] * eps.shape[1],
                                      -1)  # [N2*N, D or K]
             if self._block_pinverse:
-                yA, yB = self._compute_block_pinverse(z_inputs, eps_inputs)
+                yA, yB, _ = self._compute_block_pinverse(
+                    z_inputs, eps_inputs, outputs)
                 jac_y, _ = self._net.compute_vjp_partial(
                     z_inputs, yA, partial_idx=0)
-                jac_y = jac_y.reshape(eps.shape[0], eps.shape[1], -1)
-                v1 = eps[:, :, :self._noise_dim]
-                loss = torch.nn.functional.mse_loss(jac_y, v1)
+                v1 = eps[:, :, :self._noise_dim]  # [N2, N, K]
+                jac_a = jac_y + self._fullrank_diag_weight * yA  # [N2*N, K]
+                jac_a = jac_a.reshape(v1.shape[0], v1.shape[1],
+                                      -1)  # [N2, N, K]
+                loss = torch.nn.functional.mse_loss(jac_a, v1)
+
             else:
                 y = self._pinverse.predict_step((z_inputs, eps_inputs)).output
                 # [N2*N, D]
@@ -971,7 +962,7 @@ class Generator(Algorithm):
                                      self._output_dim - self._noise_dim)),
                         dim=-1)
                     jac_y += self._fullrank_diag_weight * y  # [N2*N, D]
-                jac_y = jac_y.reshape(z.shape[0], eps.shape[1],
+                jac_y = jac_y.reshape(eps.shape[0], eps.shape[1],
                                       -1)  # [N2, N, D or K]
                 loss = torch.nn.functional.mse_loss(jac_y, eps)
 
@@ -1020,18 +1011,14 @@ class Generator(Algorithm):
         num_particles = outputs.shape[0]
         outputs2, gen_inputs2 = self._predict(
             batch_size=num_particles)  # [N2, D]
-        if self._exact_jac_inverse:
-            outputs2, _ = outputs2
-
         # [N2, N], [N2, N, D]
         kernel_weight, kernel_grad = self._rbf_func2(gen_inputs2, gen_inputs)
         # train pinverse
-        if not self._exact_jac_inverse:
-            for _ in range(self._pinverse_solve_iters):
-                pinverse_loss = self._pinverse_train_step(
-                    gen_inputs2.detach(), kernel_grad.detach())
-                self._pinverse.update_with_gradient(
-                    LossInfo(loss=pinverse_loss))
+        for _ in range(self._pinverse_solve_iters):
+            pinverse_loss = self._pinverse_train_step(gen_inputs2.detach(),
+                                                      kernel_grad.detach(),
+                                                      outputs2.detach())
+            self._pinverse.update_with_gradient(LossInfo(loss=pinverse_loss))
 
         # construct functional gradient via pinverse
         gen_inputs2_batch = torch.repeat_interleave(
@@ -1039,14 +1026,9 @@ class Generator(Algorithm):
         kernel_grad_batch = kernel_grad.reshape(num_particles * num_particles,
                                                 -1).detach()
         if self._block_pinverse:
-            yA, yB = self._compute_block_pinverse(
-                gen_inputs2_batch, kernel_grad_batch)  # [N2*N, D]
+            yA, yB, _ = self._compute_block_pinverse(
+                gen_inputs2_batch, kernel_grad_batch, outputs2)  # [N2*N, D]
             J_inv_kernel_grad = torch.cat([yA, yB], dim=-1)
-        elif self._exact_jac_inverse:
-            J_inv = torch.inverse(jac)
-            J_inv_kernel_grad = torch.einsum('ijk, iaj->iak', J_inv,
-                                             kernel_grad)  # [N2, N, D]
-            pinverse_loss = ()
         else:
             J_inv_kernel_grad = self._pinverse.predict_step(
                 (gen_inputs2_batch, kernel_grad_batch)).output  # [N2*N, D]

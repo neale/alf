@@ -28,6 +28,7 @@ from alf.networks import Network
 from alf.layers import FC
 from alf.tensor_specs import TensorSpec
 from alf.utils.datagen import Test8GaussiansDataSet
+from alf.utils.datagen import Test25GaussiansDataSet
 
 import os
 import matplotlib
@@ -42,15 +43,15 @@ class Net(Network):
                 shape=(noise_dim, ), dtype=torch.float32),
             name="Net")
 
-        self.fc1 = FC(noise_dim, hidden_size, activation=F.relu)
-        self.fc2 = FC(hidden_size, hidden_size, activation=F.relu)
-        self.fc3 = FC(hidden_size, hidden_size, activation=F.relu)
+        self.fc1 = FC(noise_dim, hidden_size, activation=F.relu, use_bn=True)
+        self.fc2 = FC(hidden_size, hidden_size, activation=F.relu, use_bn=True)
+        self.fc3 = FC(hidden_size, hidden_size, activation=F.relu, use_bn=True)
         self.fc4 = FC(hidden_size, output_dim)
 
     def forward(self, input, state=()):
         x = self.fc1(input)
-        #x = self.fc2(x)
-        #x = self.fc3(x)
+        x = self.fc2(x)
+        x = self.fc3(x)
         x = self.fc4(x)
         return x, state
 
@@ -75,13 +76,16 @@ class Net2(Network):
         return x.view(-1), state
 
 
-def generate_image(generator, noise_dim, data, batch_size, i, fg=False):
+def generate_image(generator, noise_dim, data, batch_size, i, modes, fg=False):
     """
     Generates and saves a plot of the true distribution, the generator, and the
     critic.
     """
-    N_POINTS = 128
-    RANGE = 3
+    if modes == 8:
+        RANGE = 3
+    elif modes == 25:
+        RANGE = 9
+    N_POINTS = 256
 
     points = np.zeros((N_POINTS, N_POINTS, 2), dtype='float32')
     points[:, :, 0] = np.linspace(-RANGE, RANGE, N_POINTS)[:, None]
@@ -103,9 +107,9 @@ def generate_image(generator, noise_dim, data, batch_size, i, fg=False):
     plt.scatter(samples[:, 0], samples[:, 1], c='green', marker='+')
     save_dir = '/nfs/hpc/share/ratzlafn/alf-plots/gan/8Gaussians'
     if fg:
-        save_dir = save_dir + '/gpvi'
+        save_dir = save_dir + '/gpvi-4layer-newad_gp1-diag.0001-inv10-400bn'
     os.makedirs(save_dir, exist_ok=True)
-    print('saving to ', save_dir)
+    print('saving step {} to {}'.format(i, save_dir))
     plt.savefig('{}/gen_{}.png'.format(save_dir, i))
     plt.close('all')
 
@@ -115,31 +119,39 @@ class GenerativeAdversarialTest(parameterized.TestCase, alf.test.TestCase):
         self.assertEqual(x.shape, y.shape)
         self.assertLessEqual(float(torch.max(abs(x - y))), eps)
 
+    """
     @parameterized.parameters(
         dict(
             par_vi='svgd',
             functional_gradient='rkhs',
             entropy_regularization=1.0),
         dict(par_vi=None, functional_gradient=None, entropy_regularization=0.),
-    )
+    )"""
+
     def test_gan(self,
-                 par_vi=None,
-                 functional_gradient=None,
+                 par_vi='svgd',
+                 functional_gradient='rkhs',
                  entropy_regularization=1.0,
+                 num_modes=8,
                  batch_size=256):
         """
         The generator is trained to match the likelihood of 8 Gaussian
         distributions
         """
-        logging.info("GAN: 8 Gaussians")
+        logging.info("GAN: {} Gaussians".format(num_modes))
 
         dim = 2
-        noise_dim = 1
+        noise_dim = 2
         d_iters = 5
-        net = Net(noise_dim, dim, hidden_size=256)
+        net = Net(noise_dim, dim, hidden_size=400)
         critic = Net2(dim, hidden_size=256)
+        if num_modes == 8:
+            trainset = Test8GaussiansDataSet(size=10000)
+        elif num_modes == 25:
+            trainset = Test25GaussiansDataSet(size=25000)
+        else:
+            raise NotImplementedError
 
-        trainset = Test8GaussiansDataSet(size=20000)
         train_loader = torch.utils.data.DataLoader(
             trainset, batch_size=batch_size, shuffle=True, num_workers=0)
 
@@ -148,17 +160,18 @@ class GenerativeAdversarialTest(parameterized.TestCase, alf.test.TestCase):
             input_tensor_spec=TensorSpec(shape=(dim, )),
             net=net,
             critic=critic,
-            grad_lambda=.50,
+            grad_lambda=1,
             critic_weight_clip=0.,
             critic_iter_num=d_iters,
             noise_dim=noise_dim,
             par_vi=par_vi,
             functional_gradient=functional_gradient,
             entropy_regularization=entropy_regularization,
-            block_pinverse=True,
+            block_pinverse=False,
+            force_fullrank=True,
             jac_autograd=True,
-            fullrank_diag_weight=.5,
-            pinverse_hidden_size=256,
+            fullrank_diag_weight=.0001,
+            pinverse_hidden_size=10,
             pinverse_solve_iters=1,
             pinverse_optimizer=alf.optimizers.Adam(lr=1e-4),
             critic_optimizer=alf.optimizers.Adam(lr=1e-4, betas=(.5, .9)),
@@ -177,7 +190,7 @@ class GenerativeAdversarialTest(parameterized.TestCase, alf.test.TestCase):
                 data = trainset.get_features()[:batch_size]
                 with torch.no_grad():
                     generate_image(generator, noise_dim, data, batch_size, i,
-                                   functional_gradient)
+                                   num_modes, functional_gradient)
 
 
 if __name__ == '__main__':

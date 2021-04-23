@@ -22,6 +22,7 @@ import torch
 import torchvision
 from torchvision import datasets, transforms
 from torch.utils.data import Subset
+import itertools
 
 
 class TestDataSet(torch.utils.data.Dataset):
@@ -165,6 +166,47 @@ class Test8GaussiansDataSet(torch.utils.data.Dataset):
             labels.append(label)
         samples = torch.tensor(samples)
         samples /= 1.414  # stdev
+        self._features = samples.float()
+        self._labels = torch.tensor(labels).long()
+
+    def __getitem__(self, index):
+        return self._features[index], self._labels[index]
+
+    def __len__(self):
+        return len(self._features)
+
+    def get_features(self):
+        return self._features
+
+    def get_targets(self):
+        return self._labels
+
+
+class Test25GaussiansDataSet(torch.utils.data.Dataset):
+    def __init__(self, size=10000):
+        scale = 2.
+        centers = [
+            np.array([i, j])
+            for i, j in itertools.product(range(-4, 5, 2), range(-4, 5, 2))
+        ]
+
+        variances = [0.05**2 * np.eye(len(mean)) for mean in centers]
+        print(centers)
+        print(variances)
+
+        centers = [((scale * x[0], scale * x[1]), y)
+                   for y, x in enumerate(centers)]
+        samples = []
+        labels = []
+        for _ in range(size):
+            point = np.random.randn(2) * .0025
+            center, label = random.choice(centers)
+            point[0] += center[0]
+            point[1] += center[1]
+            samples.append(point)
+            labels.append(label)
+        samples = torch.tensor(samples)
+        #samples /= .0025  # stdev
         self._features = samples.float()
         self._labels = torch.tensor(labels).long()
 

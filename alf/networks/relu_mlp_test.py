@@ -56,6 +56,7 @@ class ReluMLPTest(parameterized.TestCase, alf.test.TestCase):
         self.assertLessEqual(float(torch.max(abs(x - y))), eps)
 
     @parameterized.parameters(
+        dict(hidden_layers=()),
         dict(hidden_layers=(2, )),
         dict(hidden_layers=(2, 3), batch_size=1),
         dict(hidden_layers=(2, 3, 4)),
@@ -120,6 +121,7 @@ class ReluMLPTest(parameterized.TestCase, alf.test.TestCase):
         self.assertArrayEqual(jac_diag, jac_diag2, 1e-6)
 
     @parameterized.parameters(
+        dict(hidden_layers=()),
         dict(hidden_layers=(2, )),
         dict(hidden_layers=(2, 3), batch_size=1),
         dict(hidden_layers=(2, 3, 4)),
@@ -149,6 +151,7 @@ class ReluMLPTest(parameterized.TestCase, alf.test.TestCase):
         self.assertArrayEqual(vjp, vjp2, 1e-6)
 
     @parameterized.parameters(
+        dict(hidden_layers=()),
         dict(hidden_layers=(4, )),
         dict(hidden_layers=(4, 6), batch_size=1),
         dict(hidden_layers=(4, 6, 8)),
@@ -192,6 +195,7 @@ class ReluMLPTest(parameterized.TestCase, alf.test.TestCase):
         self.assertArrayEqual(vjp_3, vjp2_3, 1e-6)
 
     @parameterized.parameters(
+        dict(hidden_layers=()),
         dict(hidden_layers=(2, )),
         dict(hidden_layers=(2, 3), batch_size=1),
         dict(hidden_layers=(2, 3, 4)),
@@ -221,6 +225,7 @@ class ReluMLPTest(parameterized.TestCase, alf.test.TestCase):
         self.assertArrayEqual(jvp, jvp2, 1e-6)
 
     @parameterized.parameters(
+        dict(hidden_layers=()),
         dict(hidden_layers=(4, )),
         dict(hidden_layers=(4, 6), batch_size=1),
         dict(hidden_layers=(4, 6, 8)),
@@ -239,8 +244,7 @@ class ReluMLPTest(parameterized.TestCase, alf.test.TestCase):
             spec,
             output_size=output_size,
             hidden_layers=hidden_layers,
-            head_size=(3, output_size - 3))
-
+            head_size=(2, output_size - 2))
         # compute vjp using direct approach
         x = torch.randn(batch_size, input_size, requires_grad=True)
         vec = torch.randn(batch_size, input_size, requires_grad=True).t()
@@ -251,7 +255,7 @@ class ReluMLPTest(parameterized.TestCase, alf.test.TestCase):
 
         # # compute jac using autograd
         y, _ = mlp(x)
-        jvp2_0 = jvp_autograd(x, y[:, :3], vec)
+        jvp2_0 = jvp_autograd(x, y[:, :2], vec)
         jvp2_2 = jvp_autograd(x, y, vec)
         self.assertArrayEqual(jvp_0, jvp2_0, 1e-6)
         self.assertArrayEqual(jvp_2, jvp2_2, 1e-6)
@@ -263,10 +267,16 @@ class ReluMLPTest(parameterized.TestCase, alf.test.TestCase):
         x3 = torch.repeat_interleave(x, batch_size, dim=0)
         y2, _ = mlp(x3[::batch_size])
         y2 = torch.repeat_interleave(y2, batch_size, dim=0)
-        jvp2_1 = jvp_autograd(x3, y2[:, 3:], vec2)
+        jvp2_1 = jvp_autograd(x3, y2[:, 2:], vec2)
 
         self.assertArrayEqual(jvp_1, jvp2_1, 1e-6)
 
+    @parameterized.parameters(
+        dict(hidden_layers=()),
+        dict(hidden_layers=(4, )),
+        dict(hidden_layers=(4, 6), batch_size=1),
+        dict(hidden_layers=(4, 6, 8)),
+    )
     def test_autograd_jvp_partial(self,
                                   hidden_layers=(2, ),
                                   batch_size=2,
@@ -306,6 +316,7 @@ class ReluMLPTest(parameterized.TestCase, alf.test.TestCase):
         self.assertArrayEqual(jvp_2, jvp.t(), 1e-6)
 
     @parameterized.parameters(
+        dict(hidden_layers=()),
         dict(hidden_layers=(4, )),
         dict(hidden_layers=(4, 6), batch_size=1),
         dict(hidden_layers=(4, 6)),
@@ -338,13 +349,33 @@ class ReluMLPTest(parameterized.TestCase, alf.test.TestCase):
         y, _ = mlp(x)
         vjp0 = torch.autograd.grad(
             y[:, :2], x, vec[:, :2], create_graph=True)[0]
+        y, _ = mlp(x)
         vjp1 = torch.autograd.grad(
             y[:, 2:], x, vec[:, 2:], create_graph=True)[0]
+        y, _ = mlp(x)
         vjp2 = torch.autograd.grad(y, x, vec, create_graph=True)[0]
 
         self.assertArrayEqual(vjp_0, vjp0, 1e-6)
         self.assertArrayEqual(vjp_1, vjp1, 1e-6)
         self.assertArrayEqual(vjp_2, vjp2, 1e-6)
+
+        y, _ = mlp(x)
+        jac_ad = jacobian(y, x)
+        jac2 = []
+        for i in range(batch_size):
+            jac2.append(jac_ad[i, :, i, :])
+        jac2 = torch.stack(jac2, dim=0)
+        vec = vec.unsqueeze(-1)
+        vec = vec.transpose(1, 2)
+        vjp = torch.bmm(vec, jac2)  #.squeeze(-1)
+        """   
+        print (vjp_0.shape, vjp.shape)
+        print (vjp_1.shape, vjp.shape)
+        print (vjp_2.shape, vjp.shape)
+        self.assertArrayEqual(vjp_0, vjp[:, :2], 1e-6)
+        self.assertArrayEqual(vjp_1, vjp[:, 2:], 1e-6)
+        self.assertArrayEqual(vjp_2, vjp2, 1e-6)
+        """
 
 
 if __name__ == "__main__":

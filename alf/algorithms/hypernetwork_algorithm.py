@@ -26,7 +26,7 @@ import alf
 from alf.algorithms.algorithm import Algorithm
 from alf.algorithms.config import TrainerConfig
 from alf.data_structures import AlgStep, LossInfo, namedtuple
-from alf.algorithms.generator import Generator
+from alf.algorithms.generator2 import Generator
 from alf.networks import EncodingNetwork, ParamNetwork, ReluMLP
 from alf.tensor_specs import TensorSpec
 from alf.utils import common, math_ops, summary_utils

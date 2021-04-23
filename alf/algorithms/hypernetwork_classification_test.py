@@ -78,12 +78,12 @@ class HyperNetworkClassificationTest(parameterized.TestCase,
         #('svgd3', False, 'rkhs', 24, 100, 100, .3, 1),
         #('svgd3', False, 'rkhs', 24, 100, 100, .25, 1),
         #('svgd3', False, 'rkhs', 24, 100, 100, .35, 1),
-        ('svgd3', False, 'rkhs', 24, 32, 32, .3, 1),
-        ('svgd3', False, 'rkhs', 24, 32, 32, .35, 1),
-        ('svgd3', False, 'rkhs', 24, 32, 32, .25, 1),
-        #('svgd3', False, 'rkhs', 32, 32, 64, 1.0),
+        #('svgd3', False, 'rkhs', 10, 10, 10, .3, 1),
+        #('svgd3', False, 'rkhs', 24, 32, 32, .35, 1),
+        #('svgd3', False, 'rkhs', 24, 32, 32, .25, 1),
+        #('svgd3', False, 'rkhs', 151, 151, 151, .2, 1),
         #('svgd3', False, 'rkhs', 32, 32, 64, .5),
-        #('svgd3', False, 'rkhs', 32, 32, 64, .3),
+        ('svgd3', False, 'rkhs', 151, 151, 151, .1, 0),
         #('svgd3', False, 'rkhs', 64, 64, 24),
         #('svgd3', False, 'rkhs', 64, 64, 32),
         #('svgd3', False, 'rkhs', 64, 64, 16),
@@ -177,7 +177,7 @@ class HyperNetworkClassificationTest(parameterized.TestCase,
                                          pinverse_hidden_size=16,
                                          lamb=1.0,
                                          n_hidden=1,
-                                         num_classes=4,
+                                         num_classes=2,
                                          num_particles=100):
         """
         Symmetric 4-class classification problem. The training data are drawn
@@ -206,7 +206,8 @@ class HyperNetworkClassificationTest(parameterized.TestCase,
         #hidden_size = 32
         #pinverse_hidden_size = pinverse
         lr = 1e-4
-        plr = 1e-3
+        plr = 1e-4
+        pinverse_solve_iters = 2
         config = TrainerConfig(root_dir='dummy')
         algorithm = HyperNetwork(
             input_tensor_spec=input_spec,
@@ -223,11 +224,12 @@ class HyperNetworkClassificationTest(parameterized.TestCase,
             functional_gradient=functional_gradient,
             block_pinverse=True,
             force_fullrank=True,
-            jac_autograd=True,
+            jac_autograd=False,
             fullrank_diag_weight=lamb,
             pinverse_hidden_size=pinverse_hidden_size,
             critic_hidden_layers=(hidden_size, hidden_size),
             critic_iter_num=5,
+            pinverse_solve_iters=pinverse_solve_iters,
             optimizer=alf.optimizers.Adam(lr=lr, weight_decay=0),
             critic_optimizer=alf.optimizers.Adam(lr=lr),
             pinverse_optimizer=alf.optimizers.Adam(lr=plr),
@@ -262,10 +264,10 @@ class HyperNetworkClassificationTest(parameterized.TestCase,
             absl.logging.info('mean particle acc: {}'.format(mean_acc.item()))
             absl.logging.info('all particles acc: {}'.format(
                 sample_acc.item()))
-            tag = f'gpvi_block_right_ad{noise_dim}_h{hidden_size}_lr{lr}_p{pinverse_hidden_size}_l{lamb}_nh{n_hidden}_plr{plr}'
+            tag = f'2cls_gpvi_g2{noise_dim}_h{hidden_size}_lr{lr}_p{pinverse_hidden_size}_l{lamb}_nh{n_hidden}_plr{plr}_iters{pinverse_solve_iters}'
             plot_classification(i, algorithm, num_classes, test_inputs, tag)
 
-        train_iter = 500000
+        train_iter = 1000000
         for i in range(train_iter):
             algorithm.train_iter()
             if i % 5000 == 0:
