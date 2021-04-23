@@ -562,7 +562,7 @@ class HyperNetwork(Algorithm):
     def eval_uncertainty(self, num_particles=None):
         # Soft voting for now
         if num_particles is None:
-            num_particles = 100
+            num_particles = 10
         params = self.sample_parameters(num_particles=num_particles)
         if self._generator._par_vi == 'minmax':
             params = params[0]
@@ -572,22 +572,21 @@ class HyperNetwork(Algorithm):
                                                     num_particles)
         probs = F.softmax(outputs.mean(0), -1)
         entropy = entropy_fn(probs.T.cpu().detach().numpy())
+
         with torch.no_grad():
             outputs_outlier, _ = self._predict_dataset(self._outlier_test,
                                                        num_particles)
+
         probs_outlier = F.softmax(outputs_outlier.mean(0), -1)
         entropy_outlier = entropy_fn(probs_outlier.T.cpu().detach().numpy())
+
         auroc_entropy = self._auc_score(entropy, entropy_outlier)
         alf.summary.scalar(name='eval/auroc', data=auroc_entropy)
         logging.info("AUROC score: {}".format(auroc_entropy))
+
         ece_score = self._ece_score(probs, labels)
         alf.summary.scalar(name='eval/ece', data=ece_score)
         logging.info("ECE score: {}".format(ece_score))
-        import csv
-        with open('aucece.csv', 'a') as f:
-            writer = csv.writer(f, delimiter=',')
-            writer.writerow(
-                [str(num_particles), auroc_entropy, ece_score, '\n'])
 
     def _classification_vote(self, output, target):
         """ensmeble the ooutputs from sampled classifiers."""
@@ -671,8 +670,6 @@ class HyperNetwork(Algorithm):
             data = data.to(alf.get_default_device())
             target = target.to(alf.get_default_device())
             targets.append(target.view(-1))
-            #params = self.sample_parameters(num_particles=num_particles)
-            #self._param_net.set_parameters(params)
             output, _ = self._param_net(data)
             if output.dim() == 2:
                 output = output.unsqueeze(1)
