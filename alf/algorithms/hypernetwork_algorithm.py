@@ -31,11 +31,12 @@ from alf.networks import EncodingNetwork, ParamNetwork, ReluMLP
 from alf.tensor_specs import TensorSpec
 from alf.utils import common, math_ops, summary_utils
 from alf.utils.summary_utils import record_time
+from alf.utils.sl_utils import auc_score, ece_score, predict_dataset
 
-try:
-    from sklearn.metrics import roc_auc_score
-except:
-    pass
+#try:
+#    from sklearn.metrics import roc_auc_score
+#except:
+#    pass
 
 
 def classification_loss(output, target):
@@ -90,7 +91,7 @@ def regression_loss(output, target):
     return LossInfo(loss=loss, extra=())
 
 
-def auc_score(inliers, outliers):
+def __auc_score(inliers, outliers):
     """
     Computes the AUROC score w.r.t network outputs on two distinct datasets.
         Typically, one dataset is the main training/testing set, while the
@@ -110,7 +111,7 @@ def auc_score(inliers, outliers):
     return roc_auc_score(y_true, y_score)
 
 
-def predict_dataset(model, testset):
+def __predict_dataset(model, testset):
     """
     Computes predictions for an input dataset. 
     Args: 
@@ -190,6 +191,8 @@ class HyperNetwork(Algorithm):
                  block_pinverse=False,
                  jac_autograd=False,
                  force_fullrank=True,
+                 expectation_logp=True,
+                 use_kernel_logp=True,
                  fullrank_diag_weight=1.0,
                  pinverse_solve_iters=1,
                  pinverse_hidden_size=100,
@@ -366,6 +369,8 @@ class HyperNetwork(Algorithm):
             block_pinverse=block_pinverse,
             jac_autograd=jac_autograd,
             force_fullrank=force_fullrank,
+            expectation_logp=expectation_logp,
+            use_kernel_logp=use_kernel_logp,
             fullrank_diag_weight=fullrank_diag_weight,
             pinverse_solve_iters=pinverse_solve_iters,
             pinverse_hidden_size=pinverse_hidden_size,
@@ -382,6 +387,7 @@ class HyperNetwork(Algorithm):
         self._loss_type = loss_type
         self._function_vi = function_vi
         self._functional_gradient = functional_gradient
+        self._block_pinverse = block_pinverse
         self._logging_training = logging_training
         self._logging_evaluate = logging_evaluate
         self._config = config
@@ -472,6 +478,8 @@ class HyperNetwork(Algorithm):
         """
         if params is None:
             params = self.sample_parameters(num_particles=num_particles)
+        if self._block_pinverse:
+            _, params = params
         self._param_net.set_parameters(params)
         outputs, _ = self._param_net(inputs)
         return AlgStep(output=outputs, state=(), info=())
@@ -486,7 +494,8 @@ class HyperNetwork(Algorithm):
         Return:
             mini_batch number
         """
-
+        import time
+        times = []
         assert self._train_loader is not None, "Must set data_loader first."
         alf.summary.increment_global_counter()
         with record_time("time/train"):
@@ -495,6 +504,7 @@ class HyperNetwork(Algorithm):
             if self._loss_type == 'classification':
                 avg_acc = []
             for batch_idx, (data, target) in enumerate(self._train_loader):
+                start = time.time()
                 data = data.to(alf.get_default_device())
                 target = target.to(alf.get_default_device())
                 alg_step = self.train_step((data, target),
@@ -506,6 +516,10 @@ class HyperNetwork(Algorithm):
                     pinverse_loss += loss_info.extra.pinverse
                 if self._loss_type == 'classification':
                     avg_acc.append(alg_step.info.extra.generator.extra)
+                end = time.time()
+                duration = (end - start)
+                times.append(duration)
+        print(torch.tensor(times).mean())
         acc = None
         if self._loss_type == 'classification':
             acc = torch.as_tensor(avg_acc).mean() * 100
@@ -655,6 +669,8 @@ class HyperNetwork(Algorithm):
         if self._use_fc_bn:
             self._generator.eval()
         params = self.sample_parameters(num_particles=num_particles)
+        if self._block_pinverse:
+            _, params = params
         self._param_net.set_parameters(params)
         if self._use_fc_bn:
             self._generator.train()
@@ -731,6 +747,8 @@ class HyperNetwork(Algorithm):
         if num_particles is None:
             num_particles = self._num_particles
         params = self.sample_parameters(num_particles=num_particles)
+        if self._block_pinverse:
+            _, params = params
         self._param_net.set_parameters(params)
 
         with torch.no_grad():
@@ -753,8 +771,11 @@ class HyperNetwork(Algorithm):
 
         auroc_entropy = auc_score(entropy, entropy_outlier)
         auroc_variance = auc_score(variance, variance_outlier)
+        ece_val = ece_score(probs, labels)
+
         logging.info("AUROC score (entropy): {}".format(auroc_entropy))
         logging.info("AUROC score (variance): {}".format(auroc_variance))
+        logging.info("ECE score: {}".format(ece_val))
         alf.summary.scalar(name='eval/auroc_entropy', data=auroc_entropy)
         alf.summary.scalar(name='eval/auroc_variance', data=auroc_variance)
 

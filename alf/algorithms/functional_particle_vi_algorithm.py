@@ -26,8 +26,6 @@ from alf.algorithms.algorithm import Algorithm
 from alf.algorithms.config import TrainerConfig
 from alf.algorithms.hypernetwork_algorithm import classification_loss
 from alf.algorithms.hypernetwork_algorithm import regression_loss
-from alf.algorithms.hypernetwork_algorithm import auc_score
-from alf.algorithms.hypernetwork_algorithm import predict_dataset
 from alf.algorithms.particle_vi_algorithm import ParVIAlgorithm
 from alf.data_structures import AlgStep, LossInfo, namedtuple
 from alf.networks import EncodingNetwork, ParamNetwork
@@ -35,10 +33,7 @@ from alf.tensor_specs import TensorSpec
 from alf.nest.utils import get_outer_rank
 from alf.utils import common, math_ops, summary_utils
 from alf.utils.summary_utils import record_time
-try:
-    from sklean.metrics import roc_auc_score
-except:
-    pass
+from alf.utils.sl_utils import predict_dataset, auc_score, ece_score
 
 
 def _expand_to_replica(inputs, replicas, spec):
@@ -474,10 +469,6 @@ class FuncParVIAlgorithm(ParVIAlgorithm):
                 data = data.to(alf.get_default_device())
                 target = target.to(alf.get_default_device())
                 output, _ = self._param_net(data)  # [B, N, D]
-                if num_particles is not None:
-                    idxs = torch.randint(0, self._num_particles,
-                                         (num_particles, ))
-                    output = torch.index_select(output, 1, idxs)
                 loss, extra = self._vote(output, target)
                 if self._loss_type == 'classification':
                     test_acc += extra.item()
@@ -560,8 +551,10 @@ class FuncParVIAlgorithm(ParVIAlgorithm):
 
         auroc_entropy = auc_score(entropy, entropy_outlier)
         auroc_variance = auc_score(variance, variance_outlier)
+        ece_stat = ece_score(probs, labels)
         logging.info("AUROC score (entropy): {}".format(auroc_entropy))
         logging.info("AUROC score (variance): {}".format(auroc_variance))
+        logging.info("ECE score: {}".format(ece_stat))
         alf.summary.scalar(name='eval/auroc_entropy', data=auroc_entropy)
         alf.summary.scalar(name='eval/auroc_variance', data=auroc_variance)
 

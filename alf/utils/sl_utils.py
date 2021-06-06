@@ -21,6 +21,7 @@ import torch.nn.functional as F
 from alf.data_structures import LossInfo
 try:
     from sklearn.metrics import roc_auc_score
+    import uncertainty_metrics.numpy as um
 except:
     pass
 
@@ -38,16 +39,17 @@ def classification_loss(output, target):
             accuracy.
     """
 
-    if output.ndim == 2:
-        output = output.reshape(output.shape[0], target.shape[1], -1)
     pred = output.max(-1)[1]
     target = target.squeeze(-1)
-    acc = pred.eq(target).float().mean(0)
+    acc = pred.eq(target).float()
+    if output.ndim == 3:
+        # mean over N dimension
+        acc = acc.mean(0)
     avg_acc = acc.mean()
     if output.dim == 3:
         output = output.transpose(1, 2)
-    else:
         output = output.reshape(output.shape[0] * target.shape[1], -1)
+    if target.ndim > 1:
         target = target.reshape(-1)
     loss = F.cross_entropy(output, target)
     return LossInfo(loss=loss, extra=avg_acc)
@@ -97,6 +99,13 @@ def auc_score(inliers, outliers):
         absl.logging.info('roc_auc_score function not defined')
         auc_score = 0.5
     return auc_score
+
+
+def ece_score(probs, labels, bins=15):
+    labels = labels.cpu().numpy()
+    probs = probs.detach().cpu().numpy()
+    ece = um.ece(labels, probs, num_bins=bins)
+    return ece
 
 
 def predict_dataset(model, testset):

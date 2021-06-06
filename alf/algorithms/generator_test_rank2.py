@@ -66,8 +66,9 @@ class GeneratorTest(parameterized.TestCase, alf.test.TestCase):
 
     @parameterized.parameters(
         # gpvi+
-        #dict(fullrank_diag_weight=.005, plr=1e-3, lr=2e-2, phs=20, psi=5), # .71
-        #dict(fullrank_diag_weight=.005, plr=1e-3, lr=2e-2, phs=20, psi=5), # .71
+        dict(fullrank_diag_weight=5, plr=1e-3, lr=1e-3, phs=10, psi=1),  # .71
+        dict(fullrank_diag_weight=.005, plr=1e-3, lr=2e-2, phs=20,
+             psi=5),  # .71
         #dict(fullrank_diag_weight=.005, plr=1e-3, lr=2e-2, phs=20, psi=5), # .71
         #dict(fullrank_diag_weight=.005, plr=1e-3, lr=2e-2, phs=20, psi=5), # .71
         #dict(fullrank_diag_weight=.005, plr=1e-3, lr=2e-2, phs=20, psi=5), # .71
@@ -86,13 +87,7 @@ class GeneratorTest(parameterized.TestCase, alf.test.TestCase):
         #dict(fullrank_diag_weight=1, plr=1e-3, lr=1e-3, phs=20, psi=5), # .71
 
         # exact jac
-        dict(
-            fullrank_diag_weight=5.0,
-            plr=1e-3,
-            lr=1e-4,
-            phs=512,
-            psi=5,
-            exact=False),  # .71
+        #dict(fullrank_diag_weight=5.0, plr=1e-3, lr=1e-4, phs=512, psi=5, exact=False), # .71
         #dict(fullrank_diag_weight=1, plr=1e-3, lr=1e-3, phs=20, psi=5, exact=True), # .71
         #dict(fullrank_diag_weight=1, plr=1e-3, lr=1e-3, phs=20, psi=5, exact=True), # .71
         #dict(fullrank_diag_weight=1, plr=1e-3, lr=1e-3, phs=20, psi=5, exact=True), # .71
@@ -117,8 +112,8 @@ class GeneratorTest(parameterized.TestCase, alf.test.TestCase):
         """
         logging.info("entropy_regularization: %s par_vi: %s mi_weight: %s" %
                      (entropy_regularization, par_vi, mi_weight))
-        dim = 10
-        noise_dim = 9
+        dim = 5
+        noise_dim = 2
         batch_size = 128
 
         if exact:
@@ -166,12 +161,17 @@ class GeneratorTest(parameterized.TestCase, alf.test.TestCase):
             var = torch.tensor([1, 4]).float()
             precision = 1. / var
         elif dim > 2:
-            var = torch.ones(dim).float()
-            precision = 1. / var
+            var = torch.tensor([[1, 0, 0, 0, 0], [0, 1, 0, 0, 0],
+                                [0, 1, 0, 0, 0], [0, 1, 0, 0, 0],
+                                [0, 1, 0, 0, 0]]).float()
+
+            precision = torch.pinverse(var)
+            print(precision)
         print('True Var:', var)
 
         def _neglogprob(x):
-            y = 0.5 * torch.matmul(x * x, torch.reshape(precision, (dim, 1)))
+            #y = 0.5 * torch.matmul(x * x, torch.reshape(precision, (dim, 1)))
+            y = 0.5 * torch.einsum('bi,ij,bj->b', x, precision, x)
             y = torch.squeeze(y, dim=-1)
             return y
 
@@ -203,9 +203,8 @@ class GeneratorTest(parameterized.TestCase, alf.test.TestCase):
                 if (functional_gradient is not None) and (not exact):
                     print("pinverse loss", step.pinverse.mean())
                 print(i, "learned var=\n", learned_var)
-                print('diff', (torch.diagonal(learned_var) - var).abs())
                 avg = (var - learned_var).mean()
-                max_err = float(torch.max(abs(torch.diag(var) - learned_var)))
+                max_err = float(torch.max(abs(var - learned_var)))
                 avg_time = torch.tensor(times).mean()
                 print('[{}] avg per dim variance error: {}'.format(i, avg))
                 print('[{}] max dim error: {}'.format(i, max_err))

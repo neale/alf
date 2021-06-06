@@ -42,12 +42,14 @@ from alf.utils.summary_utils import record_time
 from alf.utils.video_recorder import VideoRecorder
 
 
-@gin.configurable
+@alf.configurable
 def create_dataset(dataset_name='mnist',
                    dataset_loader=datagen,
                    train_batch_size=100,
                    test_batch_size=100,
-                   label_idx=None):
+                   label_idx=None,
+                   scale=None,
+                   normalize=True):
     """Create a pytorch data loaders.
 
     Args:
@@ -564,7 +566,7 @@ class SLTrainer(Trainer):
             testset,
             outlier_data_loaders=(outlier_train, outlier_test))
 
-    def _create_dataset(self):
+    def _create_dataset(self, label_idx=None):
         """Create data loaders."""
         return create_dataset(label_idx=label_idx)
 

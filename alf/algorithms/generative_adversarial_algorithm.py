@@ -28,7 +28,7 @@ import alf
 from alf.algorithms.algorithm import Algorithm
 from alf.algorithms.config import TrainerConfig
 from alf.data_structures import AlgStep, LossInfo, namedtuple
-from alf.algorithms.generator import Generator
+from alf.algorithms.generator2 import Generator
 from alf.networks import EncodingNetwork, ImageDecodingNetwork, ReluMLP
 from alf.tensor_specs import TensorSpec
 from alf.utils import common, math_ops, summary_utils
@@ -47,6 +47,7 @@ class GenerativeAdversarialAlgorithm(Algorithm):
                  input_tensor_spec=None,
                  conv_layer_params=None,
                  critic_conv_layer_params=None,
+                 scaler=None,
                  net=None,
                  critic=None,
                  activation=torch.relu_,
@@ -56,6 +57,7 @@ class GenerativeAdversarialAlgorithm(Algorithm):
                  use_bn=False,
                  use_critic_bn=False,
                  grad_lambda=0.,
+                 metric='jsd',
                  critic_weight_clip=0.01,
                  noise_dim=64,
                  entropy_regularization=1.,
@@ -68,6 +70,8 @@ class GenerativeAdversarialAlgorithm(Algorithm):
                  pinverse_solve_iters=1,
                  pinverse_hidden_size=100,
                  par_vi=None,
+                 expectation_logp=True,
+                 use_kernel_logp=True,
                  critic_optimizer=None,
                  pinverse_optimizer=None,
                  optimizer=None,
@@ -190,6 +194,8 @@ class GenerativeAdversarialAlgorithm(Algorithm):
             block_pinverse=block_pinverse,
             force_fullrank=force_fullrank,
             jac_autograd=jac_autograd,
+            expectation_logp=expectation_logp,
+            use_kernel_logp=use_kernel_logp,
             fullrank_diag_weight=fullrank_diag_weight,
             pinverse_solve_iters=pinverse_solve_iters,
             pinverse_hidden_size=pinverse_hidden_size,
@@ -197,6 +203,12 @@ class GenerativeAdversarialAlgorithm(Algorithm):
             name=name)
 
         self.critic = critic
+        self.critic_optimizer = critic_optimizer
+        self.optimizer = optimizer
+        assert metric in ['jsd', 'w1', 'kl-w1'], "metric to minimize must " \
+            "be ``jsd``, ``w1``, or ``kl-w1``"
+        self._scaler = scaler
+        self._metric = metric
         self._critic_iter_num = critic_iter_num
         self._grad_lambda = grad_lambda
         self._critic_weight_clip = critic_weight_clip
@@ -210,18 +222,27 @@ class GenerativeAdversarialAlgorithm(Algorithm):
         self._logging_evaluate = logging_evaluate
         self._config = config
 
+    def _trainable_attributes_to_ignore(self):
+        return ["critic"]
+
     def set_data_loader(self,
                         train_loader,
                         test_loader=None,
+                        data_transform=None,
                         entropy_regularization=None):
         """Set data loadder for training and testing.
 
         Args:
             train_loader (torch.utils.data.DataLoader): training data loader
             test_loader (torch.utils.data.DataLoader): testing data loader
+            data_transform (Callable): function to transform data before 
+                train step. Function must take (data, target) tensors and
+                return a tuple of (transformed data, transformed target)
+                tensors. 
         """
         self._train_loader = train_loader
         self._test_loader = test_loader
+        self._data_transform = data_transform
         if entropy_regularization is not None:
             self._entropy_regularization = entropy_regularization
 
@@ -233,35 +254,47 @@ class GenerativeAdversarialAlgorithm(Algorithm):
             noise=noise, batch_size=batch_size, training=training)
         return generator_step.output
 
-    def train_iter(self, save_samples=True, state=None):
+    def train_iter(self, save_samples=False, state=None):
         """Perform one epoch (iteration) of training."""
-
+        import time
         assert self._train_loader is not None, "Must set data_loader first."
         alf.summary.increment_global_counter()
         with record_time("time/train"):
             loss = 0.
+            cum_d_loss = 0.
+            cum_g_loss = 0.
             pinverse_loss = 0.
             for batch_idx, (data, _) in enumerate(self._train_loader):
                 data = data.to(alf.get_default_device())
                 if batch_idx % (self._critic_iter_num + 1):
-                    model = 'critic'
+                    alg_step = self.train_step(
+                        data, model='critic', state=state)
+                    d_loss = alg_step.info.loss
+                    self.critic_optimizer.zero_grad(set_to_none=True)
+                    d_loss.backward()
+                    self.critic_optimizer.step()
+                    cum_d_loss += d_loss.item()
                 else:
-                    model = 'generator'
-                alg_step = self.train_step(data, model=model, state=state)
-                loss_info, samples = self.update_with_gradient(alg_step.info)
-                self._generator.after_update(alg_step.info)
-                loss += loss_info.loss
-                if model == 'generator':
-                    if self._functional_gradient is not None:
-                        pinverse_loss += loss_info.extra.pinverse
+                    alg_step = self.train_step(
+                        data, model='generator', state=state)
+                    g_loss = alg_step.info.loss
+                    loss_info, samples = self.update_with_gradient(
+                        alg_step.info, scaler=self._scaler)
+                    if self._functional_gradient:
+                        pinverse_loss += loss_info.extra.pinverse.item()
+                    cum_g_loss += g_loss.mean().item()
+
         if self._logging_training:
-            logging.info("Cum Loss: {}".format(loss))
+            logging.info("Cum G Loss: {}".format(cum_g_loss))
+            logging.info("Cum D Loss: {}".format(cum_d_loss))
             if self._functional_gradient:
                 logging.info("Avg Pinverse Loss: {}".format(
                     pinverse_loss / batch_idx))
-        samples = self.sample_outputs(batch_size=data.shape[0])
-        samples = samples.detach()
         if save_samples:
+            samples = self.sample_outputs(batch_size=data.shape[0])
+            if isinstance(samples, tuple):
+                _, samples = samples
+            samples = samples.detach()
             self._save_samples(
                 samples,
                 step=alf.summary.get_global_counter(),
@@ -289,21 +322,35 @@ class GenerativeAdversarialAlgorithm(Algorithm):
                 if self._critic_weight_clip > 0:
                     param.data.clamp_(-self._critic_weight_clip,
                                       self._critic_weight_clip)
-
+            self.critic.zero_grad()  #set_to_none=True)
             critic_data = self.critic(inputs)[0]
             with torch.no_grad():
                 samples = self.sample_outputs(batch_size=inputs.shape[0])
+            if isinstance(samples, tuple):
+                _, samples = samples
             samples.requires_grad_(True)
             critic_samples = self.critic(samples)[0]
             if self._grad_lambda != 0.:
-                grad_penalty = self._gradient_penalty(inputs, samples,
-                                                      self._grad_lambda)
+                grad_penalty = self._gradient_penalty(inputs, samples)
             else:
                 grad_penalty = 0.
+            if self._metric in ['w1', 'kl-w1']:
+                if self._metric == 'w1':
+                    loss_data = -1 * critic_data.mean()
+                    loss_samples = critic_samples.mean()
+                else:
+                    loss_data, loss_samples = self._kl_critic_loss(
+                        critic_data, critic_samples)
+                loss = loss_data + loss_samples + grad_penalty
+            elif self._metric == 'jsd':
+                real_labels = torch.ones(inputs.shape[0]).float()
+                loss_data = F.binary_cross_entropy_with_logits(
+                    critic_data, real_labels)
+                fake_labels = torch.zeros(samples.shape[0]).float()
+                loss_samples = F.binary_cross_entropy_with_logits(
+                    critic_samples, fake_labels)
+                loss = loss_samples + loss_data + grad_penalty
 
-            loss_data = -1 * critic_data.mean()
-            loss_gen = critic_samples.mean()
-            loss = loss_data + loss_gen + grad_penalty
             step = AlgStep(
                 output=samples,
                 state=(),
@@ -311,31 +358,27 @@ class GenerativeAdversarialAlgorithm(Algorithm):
                     loss=loss, extra=GenerativeAdversarialLossInfo(loss=loss)))
 
         else:
-            self._generator._net.zero_grad()
             for param in self.critic.parameters():
                 param.requires_grad = False
-            if self._par_vi is not None:
-                step = self._generator.train_step(
-                    inputs=None,
-                    loss_func=self._critic_loss,
-                    batch_size=inputs.shape[0],
-                    entropy_regularization=self._entropy_regularization,
-                    state=state)
-            else:
-                samples = self.sample_outputs(batch_size=inputs.shape[0])
-                critic_samples = self.critic(samples)[0].mean()
-                loss = -1 * critic_samples
-                step = AlgStep(
-                    output=samples,
-                    state=(),
-                    info=LossInfo(
-                        loss=loss,
-                        extra=GenerativeAdversarialLossInfo(loss=loss)))
+            self._generator._net.zero_grad(set_to_none=True)
+            step = self._generator.train_step(
+                inputs=None,
+                loss_func=self._critic_loss,
+                batch_size=inputs.shape[0],
+                entropy_regularization=self._entropy_regularization,
+                state=state)
         return step
 
     def _critic_loss(self, inputs):
-        critic_outputs = -1 * self.critic(inputs)[0]
-        return LossInfo(loss=critic_outputs)
+        outputs = self.critic(inputs)[0]
+        if self._metric == 'w1':
+            loss = -1 * outputs
+        elif self._metric == 'jsd':
+            labels = torch.ones(inputs.shape[0]).float()
+            loss = F.binary_cross_entropy_with_logits(outputs, labels)
+        elif self._metric == 'kl-w1':
+            loss = self._kl_gen_loss(outputs)
+        return loss
 
     def evaluate(self):
         """Evaluate on a randomly drawn network. """
@@ -353,7 +396,9 @@ class GenerativeAdversarialAlgorithm(Algorithm):
                 critic_samples_cost = self.critic(samples)[0].mean()
                 critic_data_loss += critic_data_cost.item()
                 critic_samples_loss += critic_samples_cost.item()
-                w1_distance += (critic_data_cost - critic_samples_cost).item()
+                if self._metric == 'w1':
+                    w1_distance += (
+                        critic_data_cost - critic_samples_cost).item()
 
         if self._logging_evaluate:
             logging.info("Test Disc Data Loss: {}".format(critic_data_loss))
@@ -364,9 +409,25 @@ class GenerativeAdversarialAlgorithm(Algorithm):
             name='eval/test_critic_data_loss', data=critic_data_loss)
         alf.summary.scalar(
             name='eval/test_critic_samples_loss', data=critic_samples_loss)
-        alf.summary.scalar(name='eval/test_w1_dist', data=w1_distance)
+        if self._metric == 'w1':
+            alf.summary.scalar(name='eval/test_w1_dist', data=w1_distance)
 
-    def _gradient_penalty(self, data, samples, lamb=10.0):
+    def _kl_gen_loss(self, samples):
+        samples_norm = torch.exp(samples).mean()
+        samples_r = torch.exp(samples) / samples_norm
+        samples = samples * samples_r
+        loss = -1 * samples.mean()
+        return loss
+
+    def _kl_critic_loss(self, data, samples):
+        loss_data = F.relu(1. - data).mean()
+        samples_norm = torch.exp(samples).mean()
+        samples_r = torch.exp(samples) / samples_norm
+        samples = samples * samples_r
+        loss_samples = F.relu(1. + samples).mean()
+        return loss_data, loss_samples
+
+    def _gradient_penalty(self, data, samples):
         """ computes a gradient penalty (wgan-gp) """
         data = data.view(data.shape[0], -1)
         samples = samples.view(samples.shape[0], -1)
@@ -379,14 +440,15 @@ class GenerativeAdversarialAlgorithm(Algorithm):
         grad_outputs = torch.ones(critic_interpolates.size())
         grad_outputs = grad_outputs.to(alf.get_default_device())
         grads = torch.autograd.grad(
-            outputs=critic_interpolates,
+            outputs=self._scaler.scale(critic_interpolates),
             inputs=interpolates,
             grad_outputs=grad_outputs,
             create_graph=True,
             retain_graph=True,
             only_inputs=True)[0]
 
-        grad_penalty = ((grads.norm(2, dim=1) - 1)**2).mean() * lamb
+        grad_penalty = (
+            (grads.norm(2, dim=1) - 1)**2).mean() * self._grad_lambda
         return grad_penalty
 
     def _spectral_norm(self, module):

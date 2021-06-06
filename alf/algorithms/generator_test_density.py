@@ -21,7 +21,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 import alf
-from alf.algorithms.generator import Generator
+from alf.algorithms.generator2 import Generator
 from alf.networks import Network
 from alf.networks.relu_mlp import ReluMLP
 from alf.tensor_specs import TensorSpec
@@ -160,9 +160,9 @@ class GeneratorTest(parameterized.TestCase, alf.test.TestCase):
             energy='twin_moons',
             batch_size=128,
             input_noise_stdev=2.0,
-            n_layers=6,
-            hidden_size=256,
-            pinverse_hidden_size=64,
+            n_layers=3,
+            hidden_size=128,
+            pinverse_hidden_size=100,
             mi_weight=None,
     ):
         r"""
@@ -176,19 +176,13 @@ class GeneratorTest(parameterized.TestCase, alf.test.TestCase):
             (entropy_regularization, par_vi, mi_weight, energy))
         common.set_random_seed(None)
         dim = 2
-        noise_dim = 1
-        if functional_gradient is not None:
-            input_dim = TensorSpec((noise_dim, ))
-            hidden_sizes = [hidden_size] * n_layers
-            net = ReluMLP(
-                input_dim, hidden_layers=hidden_sizes, output_size=dim)
-        else:
-            net = Net(noise_dim, dim, hidden_size)
-
-        print(net._fc_layers[0].weight.mean(), net._fc_layers[1].weight.mean(),
-              net._fc_layers[2].weight.mean())
+        noise_dim = 2
+        net = Net(noise_dim, dim, hidden_size)
         ll_fn = get_energy_function(energy)
-        fullrank_diag_weight = 1.
+        fullrank_diag_weight = 0.2
+        pinverse_solve_iters = 200
+        lr = 1e-4
+        plr = 1e-4
         generator = Generator(
             dim,
             noise_dim=noise_dim,
@@ -197,22 +191,23 @@ class GeneratorTest(parameterized.TestCase, alf.test.TestCase):
             mi_weight=mi_weight,
             par_vi=par_vi,
             functional_gradient=functional_gradient,
-            exact_jac_inverse=False,
             pinverse_hidden_size=pinverse_hidden_size,
             force_fullrank=True,
             block_pinverse=True,
             jac_autograd=True,
+            pinverse_solve_iters=pinverse_solve_iters,
             fullrank_diag_weight=fullrank_diag_weight,
             input_noise_stdev=input_noise_stdev,
             critic_hidden_layers=(hidden_size, hidden_size),
-            optimizer=alf.optimizers.Adam(lr=1e-4),  #, weight_decay=1e-4),
-            pinverse_optimizer=alf.optimizers.Adam(lr=1e-4),
+            optimizer=alf.optimizers.Adam(lr=lr),  #, weight_decay=1e-4),
+            pinverse_optimizer=alf.optimizers.Adam(lr=plr),
             critic_optimizer=alf.optimizers.Adam(lr=1e-3))
 
         if functional_gradient is not None:
-            par_vi = par_vi + '_fg_{}ps_{}hs_{}bs_stdev{}_l{}_lamb{}_lr4'.format(
+            par_vi = par_vi + '_gpvi_block_{}ps_{}hs_{}bs_stdev{}_l{}_lamb{}_lr{}_plr{}_iters{}'.format(
                 pinverse_hidden_size, hidden_size, batch_size,
-                input_noise_stdev, n_layers, fullrank_diag_weight)
+                input_noise_stdev, n_layers, fullrank_diag_weight, lr, plr,
+                pinverse_solve_iters)
         else:
             par_vi = par_vi + '_{}hs_{}bs_stdev{}_l{}'.format(
                 hidden_size, batch_size, input_noise_stdev, n_layers)

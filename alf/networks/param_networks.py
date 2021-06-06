@@ -13,6 +13,7 @@
 # limitations under the License.
 """Networks with input parameters."""
 
+import alf
 import functools
 import gin
 import torch
@@ -25,7 +26,7 @@ from alf.tensor_specs import TensorSpec
 from alf.utils import common
 
 
-@gin.configurable
+@alf.configurable
 class ParamConvNet(Network):
     def __init__(self,
                  input_channels,

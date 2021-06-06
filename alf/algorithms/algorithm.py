@@ -1026,6 +1026,7 @@ class Algorithm(nn.Module):
     # Subclass may override update_with_gradient() to allow customized training
     def update_with_gradient(self,
                              loss_info,
+                             scaler=None,
                              valid_masks=None,
                              weight=1.0,
                              batch_info=None):
@@ -1077,11 +1078,14 @@ class Algorithm(nn.Module):
                                "optimizer: %s" % (self.name, unhandled))
         optimizers = self.optimizers()
         for optimizer in optimizers:
-            optimizer.zero_grad()
+            optimizer.zero_grad(set_to_none=True)
 
         if isinstance(loss_info.loss, torch.Tensor):
             loss = weight * loss_info.loss
-            loss.backward()
+            if scaler is not None:
+                scaler.scale(loss).backward()
+            else:
+                loss.backward()
 
         all_params = []
         for optimizer in optimizers:
@@ -1093,7 +1097,11 @@ class Algorithm(nn.Module):
                 "' haven't been used for learning any parameters! Please check."
             )
             all_params.extend(params)
-            optimizer.step()
+            if scaler is not None:
+                scaler.step(optimizer)
+                scaler.update()
+            else:
+                optimizer.step()
 
         all_params = [(self._param_to_name[p], p) for p in all_params]
         return loss_info, all_params

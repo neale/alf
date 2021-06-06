@@ -22,6 +22,7 @@ import torch
 import torchvision
 from torchvision import datasets, transforms
 from torch.utils.data import Subset
+from PIL import Image
 import itertools
 
 
@@ -147,8 +148,9 @@ class TestNClassDataSet(torch.utils.data.Dataset):
 
 
 class Test8GaussiansDataSet(torch.utils.data.Dataset):
-    def __init__(self, size=10000):
-        scale = 2.
+    def __init__(self, size=10000, data_std=0.5):
+        scale = 6.
+        RNG = np.random.RandomState()
         centers = [((1, 0), 0), ((-1, 0), 1), ((0, 1), 2), ((0, -1), 3),
                    ((1. / np.sqrt(2), 1. / np.sqrt(2)), 4),
                    ((1. / np.sqrt(2), -1. / np.sqrt(2)), 5),
@@ -158,7 +160,7 @@ class Test8GaussiansDataSet(torch.utils.data.Dataset):
         samples = []
         labels = []
         for _ in range(size):
-            point = np.random.randn(2) * .02
+            point = RNG.randn(2) * data_std
             center, label = random.choice(centers)
             point[0] += center[0]
             point[1] += center[1]
@@ -183,23 +185,20 @@ class Test8GaussiansDataSet(torch.utils.data.Dataset):
 
 
 class Test25GaussiansDataSet(torch.utils.data.Dataset):
-    def __init__(self, size=10000):
+    def __init__(self, size=10000, data_std=0.02):
         scale = 2.
         centers = [
             np.array([i, j])
             for i, j in itertools.product(range(-4, 5, 2), range(-4, 5, 2))
         ]
 
-        variances = [0.05**2 * np.eye(len(mean)) for mean in centers]
-        print(centers)
-        print(variances)
-
+        variances = [data_std**2 * np.eye(len(mean)) for mean in centers]
         centers = [((scale * x[0], scale * x[1]), y)
                    for y, x in enumerate(centers)]
         samples = []
         labels = []
         for _ in range(size):
-            point = np.random.randn(2) * .0025
+            point = np.random.randn(2) * data_std
             center, label = random.choice(centers)
             point[0] += center[0]
             point[1] += center[1]
@@ -290,10 +289,14 @@ def load_mnist(label_idx=None,
         test_loader (torch.utils.data.DataLoader): test data loader.
     """
 
+    if num_workers > 0:
+        pin_memory = True
+    else:
+        pin_memory = False
     kwargs = {
         'num_workers': num_workers,
-        'pin_memory': False,
-        'drop_last': False
+        'pin_memory': pin_memory,
+        'drop_last': True
     }
     path = 'data_m/'
 
@@ -303,13 +306,13 @@ def load_mnist(label_idx=None,
         normalize = transforms.Normalize((0.1307, ), (0.3081, ))
     else:
         normalize = transforms.Normalize((0, ), (1, ))
-
-    data_transform = transforms.Compose(
-        [transforms.Resize(scale),
-         transforms.ToTensor(), normalize])
+    data_transform = transforms.Compose([  #transforms.Resize(scale),
+        transforms.ToTensor(),
+        #normalize
+    ])
 
     trainset = datasets.MNIST(
-        root=path, train=False, download=True, transform=data_transform)
+        root=path, train=True, download=True, transform=data_transform)
     testset = datasets.MNIST(root=path, train=False, transform=data_transform)
 
     if label_idx is not None:
@@ -342,9 +345,14 @@ def load_cifar10(label_idx=None,
         train_loader (torch.utils.data.DataLoader): training data loader.
         test_loader (torch.utils.data.DataLoader): test data loader.
     """
+
+    if num_workers > 0:
+        pin_memory = True
+    else:
+        pin_memory = False
     kwargs = {
         'num_workers': num_workers,
-        'pin_memory': False,
+        'pin_memory': pin_memory,
         'drop_last': False
     }
     path = 'data_c10/'
@@ -352,8 +360,8 @@ def load_cifar10(label_idx=None,
     if scale is None:
         scale = 32
     if normalize:
-        transforms.Normalize((0.4914, 0.4822, 0.4465),
-                             (0.2023, 0.1994, 0.2010))
+        normalize = transforms.Normalize((0.4914, 0.4822, 0.4465),
+                                         (0.2023, 0.1994, 0.2010))
     else:
         normalize = transforms.Normalize((0, 0, 0), (1, 1, 1))
 
@@ -375,5 +383,79 @@ def load_cifar10(label_idx=None,
         testset, batch_size=test_bs, shuffle=False, **kwargs)
     train_loader = torch.utils.data.DataLoader(
         trainset, batch_size=train_bs, shuffle=True, **kwargs)
+
+    return train_loader, test_loader
+
+
+class MNIST1k(datasets.MNIST):
+    def __getitem__(self, index):
+        """
+            Args:
+                index (int): Index
+            Returns:
+                tuple: (image, target) where target is index of the target class.
+            """
+        img, target = self.data[index], int(self.targets[index])
+        # load from rgb image instead
+        img = img.permute(1, 2, 0)
+        img = Image.fromarray(img.numpy(), mode='RGB')
+        if self.transform is not None:
+            img = self.transform(img)
+        if self.target_transform is not None:
+            target = self.target_transform(target)
+        return img, target
+
+
+def load_mnist1k(train_bs=100,
+                 test_bs=100,
+                 num_workers=0,
+                 scale=None,
+                 as_ds=False,
+                 normalize=False):
+    """ Loads the MNIST dataset. 
+    
+    Args:
+        label_idx (list[int]): class indices to load from the dataset.
+        train_bs (int): training batch size.
+        test_bs (int): testing batch size. 
+        num_workers (int): number of processes to allocate for loading data.
+        
+    Returns:
+        train_loader (torch.utils.data.DataLoader): training data loader.
+        test_loader (torch.utils.data.DataLoader): test data loader.
+    """
+    if num_workers > 0:
+        pin_memory = True
+    else:
+        pin_memory = False
+    kwargs = {
+        'num_workers': num_workers,
+        'pin_memory': pin_memory,
+        'drop_last': False
+    }
+    path = 'data_m1k/'
+
+    if scale is None:
+        scale = 28
+    if normalize:
+        normalize = transforms.Normalize((0.5, ), (0.5, ))
+    else:
+        normalize = transforms.Normalize((0, ), (1, ))
+
+    data_transform = transforms.Compose(
+        [transforms.Resize(scale),
+         transforms.ToTensor(), normalize])
+
+    trainset = MNIST1k(
+        root=path, train=True, download=False, transform=data_transform)
+    testset = MNIST1k(
+        root=path, download=False, train=False, transform=data_transform)
+    if as_ds:
+        return trainset
+
+    train_loader = torch.utils.data.DataLoader(
+        trainset, batch_size=train_bs, shuffle=True, **kwargs)
+    test_loader = torch.utils.data.DataLoader(
+        testset, batch_size=test_bs, shuffle=False, **kwargs)
 
     return train_loader, test_loader

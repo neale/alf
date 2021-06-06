@@ -1,0 +1,7 @@
+{
+    "desc": "grid search for ParVI on MNIST/CIFAR-10 data",
+    "use_gpu": true,
+    "gpus": [0],
+    "max_worker_num": 1,
+    "repeats": 5
+}

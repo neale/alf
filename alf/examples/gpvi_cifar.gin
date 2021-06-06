@@ -3,30 +3,33 @@ import alf.trainers.policy_trainer
 
 # dataset config
 create_dataset.dataset_name='cifar10'
-create_dataset.train_batch_size=50
+create_dataset.train_batch_size=256
 create_dataset.test_batch_size=100
 
 CONV_LAYER_PARAMS = ((32, 3, 1, 0, 2), (64, 3, 1, 0, 2), (64, 3, 1, 0, 2))
 FC_LAYER_PARAMS = ((128, True), )
-HIDDEN_LAYERS = (512, 1024)
+HIDDEN_LAYERS = (256, 512, 1024)
 
-hypernet/Adam.lr = 1e-5
-hypernet/Adam.weight_decay = 0 
+hypernet/Adam.lr = 1e-4
+hypernet/Adam.weight_decay = 1e-4
 hypernet_pinverse/Adam.lr = 1e-4
 
 # algorithm config
 HyperNetwork.conv_layer_params = %CONV_LAYER_PARAMS
 HyperNetwork.fc_layer_params = %FC_LAYER_PARAMS
 HyperNetwork.hidden_layers = %HIDDEN_LAYERS
-HyperNetwork.noise_dim = 512
+HyperNetwork.noise_dim = 256
 HyperNetwork.num_particles = 10
 
 HyperNetwork.use_fc_bn = True
 HyperNetwork.par_vi = 'svgd3'
 HyperNetwork.functional_gradient='rkhs'
 HyperNetwork.loss_type = 'classification'
-HyperNetwork.entropy_regularization = 1e-5
-HyperNetwork.force_fullrank=False
+HyperNetwork.entropy_regularization = 1.5
+HyperNetwork.force_fullrank=True
+HyperNetwork.block_pinverse=False
+HyperNetwork.jac_autograd=True
+HyperNetwork.fullrank_diag_weight=.1
 HyperNetwork.pinverse_hidden_size=256
 HyperNetwork.optimizer = @hypernet/Adam()
 HyperNetwork.pinverse_optimizer = @hypernet_pinverse/Adam()
@@ -39,7 +42,7 @@ ParamConvNet.use_bias=True
 
 # training config
 TrainerConfig.algorithm_ctor=@HyperNetwork
-TrainerConfig.num_iterations=100
+TrainerConfig.num_iterations=200
 TrainerConfig.num_checkpoints=1
 TrainerConfig.evaluate=True
 TrainerConfig.eval_uncertainty=True
@@ -50,4 +53,4 @@ TrainerConfig.summarize_grads_and_vars=True
 TrainerConfig.hold_out_dataset = 'cifar10'
 TrainerConfig.train_classes = [0, 1, 2, 3, 4, 5]
 TrainerConfig.hold_out_classes = [6, 7, 8, 9]
-TrainerConfig.random_seed = 123344
+TrainerConfig.random_seed = None
