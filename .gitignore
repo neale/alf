@@ -119,3 +119,5 @@ venv.bak/
 # For dataset stores
 data_m/
 data_c10/
+data_m1k/
+*.pt
