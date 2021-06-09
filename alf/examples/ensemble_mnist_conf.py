@@ -33,7 +33,7 @@ alf.config(
     par_vi=None,
     loss_type='classification',
     entropy_regularization=1.0,
-    optimizer=alf.optimizers.Adam(lr=1e-3),  #, weight_decay=1e-4),
+    optimizer=alf.optimizers.Adam(lr=1e-4, weight_decay=1e-4),
     critic_optimizer=alf.optimizers.Adam(lr=5e-4, weight_decay=1e-4),
     critic_hidden_layers=(512, 512),
     critic_iter_num=5,

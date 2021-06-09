@@ -747,10 +747,10 @@ class Generator(Algorithm):
             assert dist.ndim == 1, "dist must have dimension 1 or 2."
         width, _ = torch.median(dist, dim=0)
         width = width / np.log(len(dist))
-        #self._kernel_width_averager.update(width)
+        self._kernel_width_averager.update(width)
 
-        #return self._kernel_width_averager.get()
-        return width
+        return self._kernel_width_averager.get()
+        #return width
 
     def _rbf_func(self, x, y):
         """Compute RBF kernel, used by svgd_grad. """
@@ -1124,7 +1124,6 @@ class Generator(Algorithm):
             outputs_full2 = outputs
 
         # [N2, N], [N2, N, D]
-        #print ('psi params: ', sum(p.numel() for p in self._pinverse.parameters() if p.requires_grad))
         kernel_weight, kernel_grad = self._rbf_func2(kernel_input2,
                                                      kernel_input1)
         # train pinverse

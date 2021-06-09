@@ -86,25 +86,30 @@ class GeneratorTest(parameterized.TestCase, alf.test.TestCase):
         #dict(fullrank_diag_weight=1, plr=1e-3, lr=1e-3, phs=20, psi=5), # .71
 
         # exact jac
-        dict(
-            fullrank_diag_weight=5.0,
-            plr=1e-3,
-            lr=1e-4,
-            phs=512,
-            psi=5,
-            exact=False),  # .71
+        #dict(
+        #    fullrank_diag_weight=5.0,
+        #    plr=1e-3,
+        #    lr=1e-4,
+        #    phs=512,
+        #    psi=5,
+        #    exact=False),  # .71
         #dict(fullrank_diag_weight=1, plr=1e-3, lr=1e-3, phs=20, psi=5, exact=True), # .71
         #dict(fullrank_diag_weight=1, plr=1e-3, lr=1e-3, phs=20, psi=5, exact=True), # .71
         #dict(fullrank_diag_weight=1, plr=1e-3, lr=1e-3, phs=20, psi=5, exact=True), # .71
         #dict(fullrank_diag_weight=1, plr=1e-3, lr=1e-3, phs=20, psi=5, exact=True), # .71
-    )
+        #dict(par_vi='gfsf', functional_gradient=None),
+        #dict(par_vi='gfsf', functional_gradient=None),
+        #dict(par_vi='gfsf', functional_gradient=None),
+        #dict(par_vi='gfsf', functional_gradient=None),
+        #dict(par_vi='gfsf', functional_gradient=None),
+        dict(par_vi='svgd', functional_gradient='rkhs', exact=True), )
     def test_generator_unconditional(self,
                                      entropy_regularization=1.0,
                                      par_vi='svgd3',
                                      functional_gradient='rkhs',
                                      fullrank_diag_weight=1.0,
-                                     lr=1e-4,
-                                     plr=1e-4,
+                                     lr=2e-3,
+                                     plr=1e-3,
                                      psi=1,
                                      phs=10,
                                      exact=False,
@@ -117,16 +122,16 @@ class GeneratorTest(parameterized.TestCase, alf.test.TestCase):
         """
         logging.info("entropy_regularization: %s par_vi: %s mi_weight: %s" %
                      (entropy_regularization, par_vi, mi_weight))
-        dim = 10
-        noise_dim = 9
-        batch_size = 128
+        dim = 5
+        noise_dim = 5
+        batch_size = 32
 
         if exact:
             block_pinverse = False
             jac_autograd = False
         else:
-            block_pinverse = True
-            jac_autograd = True
+            block_pinverse = False
+            jac_autograd = False
 
         if functional_gradient is not None:
             input_dim = TensorSpec((noise_dim, ))
@@ -136,7 +141,6 @@ class GeneratorTest(parameterized.TestCase, alf.test.TestCase):
                 net = ReluMLP(
                     input_dim,
                     hidden_layers=(),
-                    head_size=head_size,
                     activation=identity,
                     output_size=dim)
         else:
@@ -160,18 +164,23 @@ class GeneratorTest(parameterized.TestCase, alf.test.TestCase):
             exact_jac_inverse=exact,
             optimizer=alf.optimizers.Adam(lr=lr, name='generator'),
             pinverse_optimizer=alf.optimizers.Adam(lr=plr, name='pinverse'),
-            critic_optimizer=alf.optimizers.Adam(lr=2e-3))
+            critic_iter_num=5,
+            critic_optimizer=alf.optimizers.Adam(lr=1e-4))
 
-        if dim == 2:
-            var = torch.tensor([1, 4]).float()
-            precision = 1. / var
-        elif dim > 2:
-            var = torch.ones(dim).float()
-            precision = 1. / var
+        var = torch.rand(dim, dim).float()
+        var = torch.mm(var, var.t())
+        precision = torch.inverse(var)
+        #if dim == 2:
+        #    var = torch.tensor([1, 4]).float()
+        #    precision = 1. / var
+        #elif dim > 2:
+        #    var = torch.ones(dim).float()
+        #    precision = 1. / var
         print('True Var:', var)
 
         def _neglogprob(x):
-            y = 0.5 * torch.matmul(x * x, torch.reshape(precision, (dim, 1)))
+            #y = 0.5 * torch.matmul(x * x, torch.reshape(precision, (dim, 1)))
+            y = 0.5 * torch.einsum('bi,ij,bj->b', x, precision, x)
             y = torch.squeeze(y, dim=-1)
             return y
 
@@ -200,29 +209,16 @@ class GeneratorTest(parameterized.TestCase, alf.test.TestCase):
                 learned_var = torch.matmul(net.fc.weight, net.fc.weight.t())
 
             if i % 500 == 0:
-                if (functional_gradient is not None) and (not exact):
-                    print("pinverse loss", step.pinverse.mean())
-                print(i, "learned var=\n", learned_var)
-                print('diff', (torch.diagonal(learned_var) - var).abs())
+                #if (functional_gradient is not None) and (not exact):
+                #    print("pinverse loss", step.pinverse.mean())
+                #print(i, "learned var=\n", learned_var)
+                #print('diff', (torch.diagonal(learned_var) - var).abs())
                 avg = (var - learned_var).mean()
                 max_err = float(torch.max(abs(torch.diag(var) - learned_var)))
                 avg_time = torch.tensor(times).mean()
                 print('[{}] avg per dim variance error: {}'.format(i, avg))
                 print('[{}] max dim error: {}'.format(i, max_err))
-                print('[{}] avg time per iter: {}'.format(i, avg_time))
-
-                if i == 0:
-                    with open('scores.csv', 'a') as f:
-                        writer = csv.writer(f, delimiter=',')
-                        writer.writerow(
-                            ['----------------------------\nStep 0\n'])
-                        writer.writerow([
-                            'diag: {}\nlr: {}\nplr: {}\nphs: {}\npsi: {}'.
-                            format(fullrank_diag_weight, lr, plr, phs, psi)
-                        ])
-                        writer.writerow(['avg var err: {}'.format(avg)])
-                        writer.writerow(['max var err: {}'.format(max_err)])
-                        writer.writerow(['avg time: {}'.format(avg_time)])
+                #print('[{}] avg time per iter: {}'.format(i, avg_time))
 
         avg = (var - learned_var).mean()
         max_err = float(torch.max(abs(torch.diag(var) - learned_var)))
@@ -233,17 +229,8 @@ class GeneratorTest(parameterized.TestCase, alf.test.TestCase):
             i, (var - learned_var).mean()))
         print('[{}] avg time per iter: {}'.format(i,
                                                   torch.tensor(times).mean()))
-        with open('scores.csv', 'a') as f:
-            writer = csv.writer(f, delimiter=',')
-            writer.writerow(
-                ['----------------------------\nStep {}\n'.format(i)])
-            writer.writerow(['avg var err: {}'.format(avg)])
-            writer.writerow(['max var err: {}'.format(max_err)])
-            writer.writerow(['avg time: {}'.format(avg_time)])
-            writer.writerow(['\n----------------------------\n'])
-
         if entropy_regularization == 1.0:
-            self.assertArrayEqual(torch.diag(var), learned_var, 0.2)
+            self.assertArrayEqual(var, learned_var, 0.2)
         else:
             if mi_weight is None:
                 self.assertArrayEqual(torch.zeros(dim, dim), learned_var, 0.2)

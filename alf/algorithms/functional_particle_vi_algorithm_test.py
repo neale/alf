@@ -23,6 +23,7 @@ from alf.algorithms.functional_particle_vi_algorithm import FuncParVIAlgorithm
 from alf.tensor_specs import TensorSpec
 from alf.utils import math_ops
 from alf.utils.datagen import TestDataSet
+from alf.utils import common
 
 
 class FuncParVIAlgorithmTest(parameterized.TestCase, alf.test.TestCase):
@@ -57,11 +58,28 @@ class FuncParVIAlgorithmTest(parameterized.TestCase, alf.test.TestCase):
         self.assertGreater(float(torch.min(x - y)), eps)
 
     @parameterized.parameters(
-        ('svgd', False),
+        #('svgd', False),
+        #('svgd', False),
+        #('svgd', False),
+        #('svgd', False),
+        #('svgd', False),
         ('gfsf', False),
-        ('svgd', True),
-        ('gfsf', True),
+        ('gfsf', False),
+        ('gfsf', False),
+        ('gfsf', False),
+        ('gfsf', False),
+        #('svgd', True),
+        #('gfsf', True),
         ('minmax', False),
+        ('minmax', False),
+        ('minmax', False),
+        ('minmax', False),
+        ('minmax', False),
+        (None, False),
+        (None, False),
+        (None, False),
+        (None, False),
+        (None, False),
     )
     def test_functional_par_vi_algorithm(self,
                                          par_vi='svgd',
@@ -84,6 +102,7 @@ class FuncParVIAlgorithmTest(parameterized.TestCase, alf.test.TestCase):
         output_dim = 1
         size = 50
         beta = torch.rand(input_dim, output_dim) + 5.
+        absl.logging.info("par_vi: {}".format(par_vi))
         absl.logging.info("beta: {}".format(beta))
 
         trainset = TestDataSet(
@@ -97,7 +116,7 @@ class FuncParVIAlgorithmTest(parameterized.TestCase, alf.test.TestCase):
         test_loader = torch.utils.data.DataLoader(testset, batch_size=1)
         true_cov = torch.inverse(inputs.t() @ inputs)
         true_mean = true_cov @ inputs.t() @ targets
-
+        common.set_random_seed(None)
         algorithm = FuncParVIAlgorithm(
             input_tensor_spec=input_spec,
             last_layer_param=(output_dim, False),
@@ -114,16 +133,17 @@ class FuncParVIAlgorithmTest(parameterized.TestCase, alf.test.TestCase):
             train_loader,
             test_loader=test_loader,
             entropy_regularization=batch_size / size)
-        absl.logging.info("ground truth mean: {}".format(true_mean))
-        absl.logging.info("ground truth cov: {}".format(true_cov))
-        absl.logging.info("ground truth cov norm: {}".format(true_cov.norm()))
+
+        #absl.logging.info("ground truth mean: {}".format(true_mean))
+        #absl.logging.info("ground truth cov: {}".format(true_cov))
+        #absl.logging.info("ground truth cov norm: {}".format(true_cov.norm()))
 
         def _test(i):
             params = algorithm.particles
             computed_mean = params.mean(0)
             computed_cov = self.cov(params)
 
-            absl.logging.info("-" * 68)
+            #absl.logging.info("-" * 68)
             pred_step = algorithm.predict_step(inputs)
             preds = pred_step.output.squeeze()  # [batch, n_particles]
             computed_preds = inputs @ computed_mean  # [batch]
@@ -136,13 +156,13 @@ class FuncParVIAlgorithmTest(parameterized.TestCase, alf.test.TestCase):
             cov_err = torch.norm(computed_cov - true_cov)
             cov_err = cov_err / torch.norm(true_cov)
 
-            absl.logging.info("train_iter {}: pred err {}".format(i, pred_err))
-            absl.logging.info("train_iter {}: mean err {}".format(i, mean_err))
-            absl.logging.info("train_iter {}: cov err {}".format(i, cov_err))
-            absl.logging.info("computed_cov norm: {}".format(
-                computed_cov.norm()))
+            #absl.logging.info("train_iter {}: pred err {}".format(i, pred_err))
+            #absl.logging.info("train_iter {}: mean err {}".format(i, mean_err))
+            #absl.logging.info("train_iter {}: cov err {}".format(i, cov_err))
+            #absl.logging.info("computed_cov norm: {}".format(
+            #    computed_cov.norm()))
 
-        train_iter = 2000
+        train_iter = 50000
         for i in range(train_iter):
             algorithm.train_iter()
             if i % 1000 == 0:

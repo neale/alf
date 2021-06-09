@@ -16,12 +16,12 @@ import alf
 from alf.algorithms import functional_particle_vi_algorithm
 from alf.trainers import policy_trainer
 
-conv_net = ((6, 5, 1, 2, 2), (16, 5, 1, 0, 2), (120, 5, 1))
-fc_net = ((84, True), )
+conv_net = ((32, 3, 1, 0, 2), (64, 3, 1, 0, 2), (64, 3, 1, 0, 2))
+fc_net = ((128, True), )
 
 alf.config(
     'create_dataset',
-    dataset_name='mnist',
+    dataset_name='cifar10',
     train_batch_size=50,
     test_batch_size=100)
 
@@ -32,12 +32,8 @@ alf.config(
     num_particles=10,
     par_vi=None,
     loss_type='classification',
-    entropy_regularization=1.0,
-    optimizer=alf.optimizers.Adam(lr=1e-3),  #, weight_decay=1e-4),
-    critic_optimizer=alf.optimizers.Adam(lr=5e-4, weight_decay=1e-4),
-    critic_hidden_layers=(512, 512),
-    critic_iter_num=5,
-    critic_l2_weight=10,
+    entropy_regularization=1.5,
+    optimizer=alf.optimizers.Adam(lr=1e-3, weight_decay=1e-4),
     logging_training=True,
     logging_evaluate=True)
 
@@ -47,7 +43,7 @@ alf.config(
     'TrainerConfig',
     algorithm_ctor=functional_particle_vi_algorithm.FuncParVIAlgorithm,
     #ml_type='sl',
-    num_iterations=100,
+    num_iterations=200,
     num_checkpoints=1,
     evaluate=True,
     eval_uncertainty=True,
@@ -55,7 +51,7 @@ alf.config(
     summary_interval=1,
     debug_summaries=True,
     summarize_grads_and_vars=True,
-    hold_out_dataset='mnist',
+    hold_out_dataset='cifar10',
     train_classes=[0, 1, 2, 3, 4, 5],
     hold_out_classes=[6, 7, 8, 9],
     random_seed=None)

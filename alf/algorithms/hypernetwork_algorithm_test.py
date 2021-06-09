@@ -21,6 +21,7 @@ import alf
 from alf.algorithms.hypernetwork_algorithm import HyperNetwork
 from alf.tensor_specs import TensorSpec
 from alf.utils import math_ops
+from alf.utils import common
 
 
 class HyperNetworkTest(parameterized.TestCase, alf.test.TestCase):
@@ -54,18 +55,28 @@ class HyperNetworkTest(parameterized.TestCase, alf.test.TestCase):
         self.assertEqual(x.shape, y.shape)
         self.assertGreater(float(torch.min(x - y)), eps)
 
-    """
     @parameterized.parameters(
+        #('svgd2', False),
+        #('svgd3', False),
         ('gfsf', False),
-        ('svgd2', False),
-        ('svgd3', False),
+        ('gfsf', False),
+        ('gfsf', False),
+        ('gfsf', False),
+        ('gfsf', False),
         ('minmax', False),
-        ('gfsf', True),
-        ('svgd2', True),
-        ('svgd3', True),
-        ('svgd3', False, 'rkhs'),
-    )"""
-
+        ('minmax', False),
+        ('minmax', False),
+        ('minmax', False),
+        ('minmax', False),
+        #('gfsf', True),
+        #('svgd2', True),
+        #('svgd3', True),
+        #('svgd3', False, 'rkhs'),
+        #('svgd3', False, 'rkhs'),
+        #('svgd3', False, 'rkhs'),
+        #('svgd3', False, 'rkhs'),
+        #('svgd3', False, 'rkhs'),
+    )
     def test_bayesian_linear_regression(self,
                                         par_vi='svgd3',
                                         function_vi=False,
@@ -91,12 +102,14 @@ class HyperNetworkTest(parameterized.TestCase, alf.test.TestCase):
         hidden_size = output_dim * batch_size
         inputs = input_spec.randn(outer_dims=(batch_size, ))
         beta = torch.rand(input_size, output_dim) + 5.
+        print("par_vi: {}".format(par_vi))
         print("beta: {}".format(beta))
         noise = torch.randn(batch_size, output_dim)
         targets = inputs @ beta + noise
         true_cov = torch.inverse(inputs.t() @ inputs)
         true_mean = true_cov @ inputs.t() @ targets
         noise_dim = 3
+        common.set_random_seed(None)
         if functional_gradient is not None:
             hidden_layers = ()
         else:
@@ -118,9 +131,10 @@ class HyperNetworkTest(parameterized.TestCase, alf.test.TestCase):
             critic_hidden_layers=(hidden_size, hidden_size),
             optimizer=alf.optimizers.Adam(lr=2e-3),
             critic_optimizer=alf.optimizers.Adam(lr=1e-3))
-        print("ground truth mean: {}".format(true_mean))
-        print("ground truth cov: {}".format(true_cov))
-        print("ground truth cov norm: {}".format(true_cov.norm()))
+
+        #print("ground truth mean: {}".format(true_mean))
+        #print("ground truth cov: {}".format(true_cov))
+        #print("ground truth cov norm: {}".format(true_cov.norm()))
 
         def _train(train_batch=None, entropy_regularization=None):
             if train_batch is None:
@@ -140,25 +154,25 @@ class HyperNetworkTest(parameterized.TestCase, alf.test.TestCase):
             loss_info, params = algorithm.update_with_gradient(alg_step.info)
 
         def _test(i, sampled_predictive=False):
-            print("-" * 68)
+            #print("-" * 68)
             #if output_dim <= input_size:
             weight = algorithm._generator._net._fc_layers[0].weight
             learned_cov = weight @ weight.t()
-            print("norm of generator weight: {}".format(weight.norm()))
-            print("norm of learned_cov: {}".format(learned_cov.norm()))
+            #print("norm of generator weight: {}".format(weight.norm()))
+            #print("norm of learned_cov: {}".format(learned_cov.norm()))
 
             learned_mean = algorithm._generator._net._fc_layers[0].bias
             predicts = inputs @ learned_mean  # [batch]
             pred_err = torch.norm(predicts - targets.squeeze())
-            print("train_iter {}: pred err {}".format(i, pred_err))
+            #print("train_iter {}: pred err {}".format(i, pred_err))
 
             mean_err = torch.norm(learned_mean - true_mean.squeeze())
             mean_err = mean_err / torch.norm(true_mean)
-            print("train_iter {}: mean err {}".format(i, mean_err))
+            #print("train_iter {}: mean err {}".format(i, mean_err))
 
             cov_err = torch.norm(learned_cov - true_cov)
             cov_err = cov_err / torch.norm(true_cov)
-            print("train_iter {}: cov err {}".format(i, cov_err))
+            #print("train_iter {}: cov err {}".format(i, cov_err))
 
             if sampled_predictive:
                 params = algorithm.sample_parameters(num_particles=200)
@@ -181,7 +195,7 @@ class HyperNetworkTest(parameterized.TestCase, alf.test.TestCase):
                 scov_err = scov_err / torch.norm(true_cov)
                 print("train_iter {}: sampled cov err {}".format(i, scov_err))
 
-        train_iter = 6000
+        train_iter = 50000
         for i in range(train_iter):
             _train()
             if i % 1000 == 0:
