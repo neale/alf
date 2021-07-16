@@ -35,9 +35,10 @@ from alf.utils.sl_utils import classification_loss, predict_dataset
 from torch.cuda.amp import autocast, GradScaler
 
 
-class Generator(nn.Module):
-    def __init__(self, ngf, z_dim):
-        super(Generator, self).__init__()
+class Generator64(nn.Module):
+    def __init__(self, ngf, z_dim, metric, flat):
+        super(Generator64, self).__init__()
+        self.flat = flat
         self.main = nn.Sequential(
             # input is Z, going into a convolution
             nn.ConvTranspose2d(z_dim, ngf * 8, 4, 1, 0, bias=False),
@@ -62,18 +63,22 @@ class Generator(nn.Module):
         )
 
     def forward(self, input):
+        print(input.shape)
         input = input.view(-1, 128, 1, 1)
+        print(input.shape)
         output = self.main(input)
+        if self.flat:
+            output = output.reshape(input.shape[0], -1)
         print(output.shape)
-        return output
+        return output, None
 
 
-class Discriminator(nn.Module):
-    def __init__(self, ndf):
-        super(Discriminator, self).__init__()
+class Discriminator64(nn.Module):
+    def __init__(self, ndf, input, metric, use_sn):
+        super(Discriminator64, self).__init__()
         self.main = nn.Sequential(
             # input is (nc) x 64 x 64
-            nn.Conv2d(8, ndf, 4, 2, 1, bias=False),
+            nn.Conv2d(3, ndf, 4, 2, 1, bias=False),
             nn.LeakyReLU(0.2, inplace=True),
             # state size. (ndf) x 32 x 32
             nn.Conv2d(ndf, ndf * 2, 4, 2, 1, bias=False),
@@ -278,8 +283,8 @@ class GenerativeAdversarialTest(parameterized.TestCase, alf.test.TestCase):
         # GPVI+ JSD
         #dict(
         #    par_vi='svgd', functional_gradient='rkhs', entropy_regularization=.1,
-        #    metric='jsd', noise_dim=128, grad_lambda=0.0, d_cap=1.0, diag=.1,
-        #    p_hidden=512, p_iters=1, glr=1e-4, batch_size=64),
+        #    metric='jsd', noise_dim=128, grad_lambda=0.0, d_cap=.25, diag=.01,
+        #    p_hidden=256, p_iters=1, glr=1e-4, batch_size=64),
 
         # GPVI+ WGAN
         #dict(par_vi='svgd', functional_gradient='rkhs', entropy_regularization=.1,
@@ -324,9 +329,9 @@ class GenerativeAdversarialTest(parameterized.TestCase, alf.test.TestCase):
         metric = metric
         use_sn = use_sn
         grad_lambda = grad_lambda
-        net = Generator(dim, noise_dim)
+        net = Generator64(dim, noise_dim, 1, flat=False)
         net.apply(weights_init)
-        critic = Discriminator(input_dim)
+        critic = Discriminator64(input_dim, 1, 2, 3)
         critic.apply(weights_init)
 
         train_loader = load_mnist1k(

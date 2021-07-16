@@ -33,6 +33,7 @@ from alf.utils.datagen import load_mnist1k, load_mnist
 from alf.utils.sl_utils import classification_loss, predict_dataset
 
 from torch.cuda.amp import autocast, GradScaler
+from generative_adversarial_algorithm_mnist1k_dcgan_test import Generator64, Discriminator64
 
 
 class Generator(Network):
@@ -234,7 +235,7 @@ def train_classifier():
 
 
 def load_classifier():
-    state = torch.load('1k_clf_adv.pt')
+    state = torch.load('1k_clf.pt')
     net_state = state['model']
     optim_state = state['optim']
     net = MNISTNet(input_dim=28)
@@ -312,7 +313,7 @@ class GenerativeAdversarialTest(parameterized.TestCase, alf.test.TestCase):
         # JSD
         #dict(
         #    par_vi=None, functional_gradient=None, entropy_regularization=0.,
-        #    metric='jsd', noise_dim=128, d_cap=1.0),
+        #    metric='jsd', noise_dim=128, d_cap=.25),
         # WGAN-GP
         #dict(
         #    par_vi=None, functional_gradient=None, entropy_regularization=0.,
@@ -320,26 +321,36 @@ class GenerativeAdversarialTest(parameterized.TestCase, alf.test.TestCase):
         #    batch_size=64),
 
         # GPVI+ JSD
-        #dict(
-        #    par_vi='svgd', functional_gradient='rkhs', entropy_regularization=.1,
-        #    metric='jsd', noise_dim=128, grad_lambda=0.0, d_cap=1.0, diag=.01,
-        #    p_hidden=256, p_iters=1, glr=1e-4, batch_size=64),
-
-        # GPVI+ WGAN
         dict(
             par_vi='svgd',
             functional_gradient='rkhs',
             entropy_regularization=.1,
-            metric='w1',
+            metric='jsd',
             noise_dim=128,
-            grad_lambda=1.0,
-            use_sn=True,
-            d_cap=1.0,
+            grad_lambda=0.0,
+            d_cap=0.25,
             diag=.01,
-            p_hidden=512,
+            p_hidden=256,
             p_iters=1,
             glr=1e-4,
-            batch_size=64), )
+            batch_size=64),
+
+        # GPVI+ WGAN
+        #dict(
+        #    par_vi='svgd',
+        #    functional_gradient='rkhs',
+        #    entropy_regularization=.1,
+        #    metric='w1',
+        #    noise_dim=128,
+        #    grad_lambda=1.0,
+        #    use_sn=True,
+        #    d_cap=1.0,
+        #    diag=.01,
+        #    p_hidden=512,
+        #    p_iters=1,
+        #    glr=1e-4,
+        #    batch_size=64),
+    )
     def test_gan(self,
                  par_vi='svgd',
                  functional_gradient='rkhs',
@@ -373,19 +384,19 @@ class GenerativeAdversarialTest(parameterized.TestCase, alf.test.TestCase):
         dim = 64
         noise_dim = noise_dim
         d_iters = 5
-        input_dim = 784
+        input_dim = 64 * 64  # 784
         d_cap = d_cap
         metric = metric
         use_sn = use_sn
         grad_lambda = grad_lambda
-        net = Generator(dim, noise_dim, metric, flat)
+        net = Generator64(dim, noise_dim, metric, flat)
         net.apply(weights_init)
-        critic = Discriminator(
+        critic = Discriminator64(
             int(d_cap * dim), input_dim, metric=metric, use_sn=use_sn)
         critic.apply(weights_init)
 
         train_loader, test_loader = load_mnist1k(
-            train_bs=batch_size, test_bs=batch_size)
+            train_bs=batch_size, test_bs=batch_size, scale=64)
 
         pinverse_hidden_size = p_hidden
         pinverse_solve_iters = p_iters
@@ -398,8 +409,8 @@ class GenerativeAdversarialTest(parameterized.TestCase, alf.test.TestCase):
         mnist_clf = load_classifier()
 
         generator = GenerativeAdversarialAlgorithm(
-            output_dim=28 * 28 * 3,
-            input_tensor_spec=TensorSpec(shape=(3, 28, 28)),
+            output_dim=64 * 64 * 3,  #28 * 28 * 3,
+            input_tensor_spec=TensorSpec(shape=(3, 64, 64)),  ##(3, 28, 28)),
             net=net,
             critic=critic,
             grad_lambda=grad_lambda,
